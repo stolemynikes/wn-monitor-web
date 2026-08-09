@@ -5,3 +5,5 @@ whatnot-profile*
 .venv/
 __pycache__/
 notifications.log
+.radar.pid
+radar.log
