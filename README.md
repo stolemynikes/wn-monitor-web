@@ -1,117 +1,286 @@
 # Whatnot Giveaway Radar
 
-Watches Whatnot livestreams and pushes a notification to your phone the moment a
-giveaway starts, with a link straight into the stream.
+**It watches Whatnot streams for you and buzzes your phone the second a giveaway
+starts.** Tap the notification, you're in the stream, you enter. That's it.
 
-**It detects and notifies. It never enters anything for you.** Whatnot requires
-giveaway entries to be made manually — you tap the notification and enter in the
-app yourself. Anything else is against their rules and will get entries voided
-and accounts limited.
+Think of it as a friend who sits at your computer watching six Whatnot streams
+all evening and shouts "giveaway!" the moment one starts. It never gets bored
+and never blinks.
+
+### The one rule that matters
+
+**It does NOT enter giveaways for you. You always tap and enter yourself.**
+
+Whatnot's rules say entries must be made by a real person, by hand. This tool
+only *watches and tells you*. Anything that enters automatically is against
+their rules, gets your entries thrown out, and can get your account limited.
+That's not a limitation we forgot to fix — it's on purpose.
 
 ---
 
-## What it does
+## What you need before you start
 
-- Finds live streams in a category/country via Whatnot's own browse feed.
-- Keeps a few muted tabs open and watches each stream's realtime channel.
-- Notifies you when a giveaway starts, and again if you win.
-- Filters out what you can't or don't want to enter: buyers-only giveaways,
-  low-value prizes, and giveaways restricted to another country.
-- Holds a stream's tab open through the draw, so an entry you made stays
-  counted even after you switch away on your phone.
+| What | Why | Cost |
+|---|---|---|
+| A computer that stays on | It does the watching. Closing the lid stops it. | — |
+| A Whatnot account | It watches while logged in as you | free |
+| **Bark** app (iPhone) or **ntfy** (Android) | This is what buzzes your phone | free |
+| About 1 GB of free space | It downloads its own mini web browser | — |
+| ~20 minutes, once | Setup | — |
 
-## Requirements
+You do **not** need to know how to code. You'll copy and paste a few lines, then
+everything else happens in a normal window with buttons.
 
-- Python 3.11+
-- A phone notification app — [Bark](https://apps.apple.com/app/id1403753865)
-  (iOS, recommended) or [ntfy](https://ntfy.sh) (iOS/Android)
-- A Whatnot account you log into once, in the tool's own browser
-- ~1 GB free disk (Chromium download plus its cache)
+---
 
-## Setup
+## Part 1 — Install it (once)
+
+### Step 1: Open the black text window
+
+This is the only "techy" bit. It's a program where you type commands.
+
+- **Mac**: press `Cmd + Space`, type `Terminal`, press Enter.
+- **Windows**: press the Start button, type `PowerShell`, press Enter.
+
+A window with text appears. You'll paste lines into it and press Enter after
+each one. If it asks for your password while installing, that's normal — type it
+(you won't see the characters) and press Enter.
+
+### Step 2: Check you have Python
+
+Python is the language this tool is written in. Paste this and press Enter:
+
+```bash
+python3 --version
+```
+
+- If you see something like `Python 3.11.5` or higher → great, continue.
+- If you see an error, or a number below 3.11 → install it from
+  [python.org/downloads](https://www.python.org/downloads/), then close and
+  reopen the text window and try again.
+
+*(On Windows, use `python` instead of `python3` in every command below.)*
+
+### Step 3: Download the tool
 
 ```bash
 git clone https://github.com/stolemynikes/wn-monitor-web
 cd wn-monitor-web
-
-python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-playwright install chromium
-
-cp config.example.json config.json
-python web.py            # open http://127.0.0.1:8765
 ```
 
-Then, in the panel:
+If it says `git: command not found`, download the ZIP from the GitHub page
+instead (green **Code** button → **Download ZIP**), unzip it, and then in the
+text window type `cd ` followed by dragging the unzipped folder onto the window
+and pressing Enter.
 
-1. **Notifications** — pick Bark or ntfy, paste your key/topic, hit *Send test*
-   and confirm your phone buzzes.
-2. **Browser profile → Login** — a browser opens; log in to Whatnot, then click
-   *I'm done*. This session is stored only on your machine.
-3. **Discovery** — choose a category and one or more shipping countries.
-4. **Start**.
+### Step 4: Set it up
 
-Blocked sellers, tab count and poll intervals are all editable in the panel.
-Config changes need a restart, which the panel tells you about.
-
-## Reaching it from your phone
-
-The panel binds to `127.0.0.1` — only your machine. To use it from your phone,
-put both devices on a private network such as [Tailscale](https://tailscale.com)
-and run `python web.py --host 0.0.0.0`. **Do not expose it to the open
-internet**: it can launch a browser and read your configuration.
-
-## Command line
-
-The panel is optional; everything works headless:
+Paste these **one at a time**, waiting for each to finish. The third one
+downloads the mini browser and takes a few minutes — that's normal.
 
 ```bash
-python control.py start|stop|restart|status
-python monitor.py test        # send a test notification
-python monitor.py run         # run in the foreground
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+playwright install chromium
+cp config.example.json config.json
 ```
 
-## Please be gentle
+On **Windows**, two lines are different:
 
-Every tab and page load is traffic to someone else's service, and the defaults
-here are deliberately conservative: 3 tabs, 5-minute idle rotation, 90-second
-polling.
+```powershell
+.venv\Scripts\activate
+copy config.example.json config.json
+```
 
-If you crank those up, two things happen — Whatnot's bot protection notices, and
-the tool stops working. It already happened once during development: too many
-tabs cycling too fast triggered a Cloudflare challenge that locked the browser
-out for hours.
+### Step 5: Open the control panel
 
-**If you see `Bot challenge encountered`:**
+```bash
+python3 web.py
+```
 
-- Stop. Don't restart in a loop — each retry against an active challenge makes
-  it worse and prolongs it.
-- Leave it off for a few hours; these flags decay on their own.
-- Come back with fewer tabs and longer intervals.
-- Don't try to disguise the browser. Fingerprint spoofing is what turns a
-  harmless, temporary edge block into an account problem.
+You'll see a line saying it's running. Now open your web browser and go to:
 
-Also worth knowing: giveaways run about five minutes, and entry lists in busy
-streams are shown truncated at 50 names — so absence from a list doesn't prove
-you weren't entered.
+**http://127.0.0.1:8765**
 
-## Privacy
+You should see a dark page called **Whatnot Radar**. That's your control panel.
+Leave the text window open — closing it turns the panel off.
 
-Everything is local. Your config, your Whatnot session and your logs never leave
-your machine; the only outbound calls are to Whatnot and to your own
-notification service. `config.json`, `state.json`, `radar.log` and the browser
-profile are all gitignored — don't commit them, they contain your session and
-your notification key.
+---
 
-## Adding a category
+## Part 2 — Set it up in the panel (once)
 
-The panel ships the Pokémon-cards feed. Other categories need their feed id,
-which you can capture yourself: open the browse page for that category with
-devtools open, apply the *Shipped from* filter, find the outgoing `GetFeed`
-GraphQL request, and copy `variables.feedId` into `config.json` under
-`discovery.sources`.
+Everything from here is clicking buttons.
 
-## Not supported, on purpose
+### 1. Make your phone buzz
 
-Automating giveaway entry, and disguising the browser's fingerprint. Both break
-Whatnot's rules, and the second is the one most likely to cost you your account.
+First install **Bark** (iPhone) or **ntfy** (Android) on your phone.
+
+- **Bark**: open it. You'll see a web address with a code in it, like
+  `https://api.day.app/AbCdEf123456/`. The middle part — `AbCdEf123456` — is
+  your key. Copy it.
+- **ntfy**: open it, tap **+** to subscribe to a new topic, and invent a long
+  weird name like `giveaways-x7k2m9qp4z`. Anyone who guesses your topic name can
+  read your notifications, so make it long and random. That name is your topic.
+
+In the panel, under **Notifications**: pick Bark or ntfy, paste your key or
+topic in the box, click **Save**, then click **Send test**.
+
+**Your phone should buzz.** If it doesn't, see Troubleshooting below. Don't
+continue until this works — the whole tool is useless without it.
+
+### 2. Log in to Whatnot
+
+Under **Browser profile**, click **Login**.
+
+A browser window opens by itself. Log in to Whatnot in it, exactly like normal.
+Then come back to the panel and click **I'm done**. The window closes.
+
+That window is the tool's own private browser — separate from your normal one.
+Your usual browser, bookmarks and logins are never touched.
+
+### 3. Choose what to watch
+
+Under **Discovery**, pick a category and one or more countries (hold `Cmd` or
+`Ctrl` to pick several), then click **Apply**.
+
+Countries mean *where the seller ships from*. Pick the ones you can actually
+receive parcels from. Sellers often restrict giveaways to their own country, and
+the tool automatically hides those you can't enter.
+
+### 4. Press Start
+
+Click **Start** at the top. Within a minute you'll see lines appearing in the
+**Live log** box — that's it finding streams and opening tabs.
+
+Now leave it alone and wait for your phone to buzz.
+
+---
+
+## Part 3 — Using it day to day
+
+- **Start / Stop** — the two buttons at the top. Stop it when you don't want it.
+- **Blocked sellers** — annoying seller? Type their username and click **Block**.
+  They disappear completely: no watching, no notifications.
+- **Live log** — what it's doing right now. Useful when something seems wrong.
+- **Tuning** — how many streams to watch at once. **Leave this alone unless you
+  have a reason.** See "Going easy" below.
+
+Some browser windows will sit open on your computer while it runs. That's the
+tool doing its job — don't close them; just move them to another desktop or
+minimise them. Closing them stops the radar.
+
+### What the notifications mean
+
+| You see | It means | Do |
+|---|---|---|
+| 🎁 **Giveaway — sellername** | A giveaway just started | Tap it, enter in the app |
+| 🛒🔔 **Buyers giveaway** | A giveaway only for people who bought something | Only enterable if you buy in that stream |
+| 🏆 **You WON!** | You won something | Check the Whatnot app |
+| ⚠️ **Radar stopped** | Something needs you | See Troubleshooting |
+
+**A useful trick:** once you've tapped a giveaway and entered, you can close the
+Whatnot app. As long as the radar is still watching that stream on your
+computer, your entry stays counted through the draw.
+
+---
+
+## Going easy (please read this bit)
+
+Every stream it watches is real traffic to Whatnot's servers. The settings it
+comes with are deliberately gentle: **3 streams at a time**, checking slowly.
+
+If you turn those up to be greedy, two things happen: Whatnot's security notices
+the unusual activity, and **the tool stops working** — for hours.
+
+This isn't hypothetical. During development, too many streams cycling too fast
+set off Whatnot's bot protection and locked the browser out for most of an
+evening. Watching a few streams politely works far better than watching
+everything and getting blocked.
+
+**If you see `Bot challenge encountered` in the log:**
+
+1. **Stop. Don't keep pressing Start.** Every retry while you're blocked makes it
+   last longer.
+2. Leave it off for a few hours. These blocks fade by themselves.
+3. Start again later with *fewer* streams.
+4. **Don't install anything that "hides" or "fakes" the browser** to get around
+   it. That turns a harmless temporary block into something that can affect your
+   actual Whatnot account.
+
+---
+
+## Troubleshooting
+
+**My phone didn't buzz on the test.**
+Check the app is installed and you allowed notifications when it asked. Check
+you pasted the key correctly (no spaces). On iPhone, if the notification appears
+but is silent, look in Settings → Notifications → Bark and turn sounds on.
+
+**It says "config.json missing".**
+You skipped the `cp config.example.json config.json` line in Step 4.
+
+**The panel page won't load.**
+The text window must stay open with `python3 web.py` running. If you closed it,
+open a new one, `cd wn-monitor-web`, `source .venv/bin/activate`, `python3 web.py`.
+
+**It says "refusing to start: another radar is running".**
+You already have one running somewhere. Two at once doubles the traffic and gets
+you blocked. Stop the other one.
+
+**"Not logged in" even though I logged in.**
+Click Login again and make sure you press **I'm done** in the panel afterwards.
+
+**It says the profile is over a gigabyte.**
+Normal — the browser saves copies of everything it loads. Click **Clear cache**.
+That's safe and keeps you logged in. (**Clear site data** is the red one — that
+logs you out and you'd have to log in again.)
+
+**I stopped getting notifications.**
+Look at the log. If there's a bot challenge, read the section above. If it's
+just quiet, there may genuinely be no giveaways — it only watches a few streams
+at a time, so it won't catch every giveaway that happens.
+
+---
+
+## Your privacy
+
+Everything stays on your computer. Your Whatnot login, your settings and your
+logs never get sent anywhere. The only things it talks to are Whatnot itself and
+your own notification app.
+
+The panel is only reachable from your own machine. If you want to use it from
+your phone, put both devices on a private network like
+[Tailscale](https://tailscale.com) and start it with `python3 web.py --host
+0.0.0.0`. **Never put it on the open internet** — it can open a browser and read
+your settings.
+
+If you ever share this folder, don't include `config.json` or the
+`whatnot-profile` folder: they contain your login and your notification key.
+(They're already excluded from git for exactly this reason.)
+
+---
+
+## Some honest expectations
+
+- It watches **a few** streams at a time, not all of them. You'll miss
+  giveaways. That's the trade for not getting blocked.
+- Popular giveaways have **50 or more people** entering. Winning is luck; this
+  just gets you into more draws than you'd manage by hand.
+- It can break. It relies on how Whatnot's website works today, and if Whatnot
+  changes things, parts will stop working until someone updates the code.
+
+---
+
+## For technical users
+
+- `python control.py start|stop|restart|status` — run it without the panel.
+- `python monitor.py run` — foreground, logs to stdout.
+- `python monitor.py test` — send a test notification.
+- Config lives in `config.json`; the panel only writes an allowlist of fields.
+- The panel binds `127.0.0.1:8765`; `--host` to change, with the warning above.
+- Discovery uses Whatnot's own `GetFeed` GraphQL call. Only the Pokémon feed id
+  is bundled. To add a category: open its browse page with devtools, apply the
+  *Shipped from* filter, find the `GetFeed` request, and copy
+  `variables.feedId` into `discovery.sources` in `config.json`.
+- Deliberately unsupported: automating entry, and browser-fingerprint spoofing.
