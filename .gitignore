@@ -7,3 +7,5 @@ __pycache__/
 notifications.log
 .radar.pid
 radar.log
+.login_done
+.login_running

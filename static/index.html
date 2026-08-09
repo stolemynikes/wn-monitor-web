@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Whatnot Radar</title>
+<style>
+  :root {
+    --bg:#12131a; --panel:#1b1d27; --line:#2b2e3b; --ink:#e7e9f2;
+    --muted:#9aa0b4; --ok:#3ecf8e; --warn:#f0b429; --bad:#f2565f; --accent:#6c8cff;
+  }
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  header { padding:18px 20px; border-bottom:1px solid var(--line);
+           display:flex; align-items:center; gap:14px; flex-wrap:wrap }
+  h1 { font-size:17px; margin:0; font-weight:650 }
+  .wrap { max-width:900px; margin:0 auto; padding:20px; display:grid; gap:16px }
+  .card { background:var(--panel); border:1px solid var(--line);
+          border-radius:12px; padding:16px }
+  .card h2 { font-size:13px; margin:0 0 12px; color:var(--muted);
+             text-transform:uppercase; letter-spacing:.07em; font-weight:600 }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px;
+           padding:9px 14px; font-size:14px; font-weight:600; cursor:pointer }
+  button.ghost { background:transparent; color:var(--ink); border:1px solid var(--line) }
+  button.danger { background:var(--bad) }
+  button:disabled { opacity:.45; cursor:not-allowed }
+  .dot { width:9px; height:9px; border-radius:50%; display:inline-block }
+  .pill { display:inline-flex; align-items:center; gap:7px; padding:5px 11px;
+          border:1px solid var(--line); border-radius:999px; font-size:13px }
+  input,select { background:#111219; color:var(--ink); border:1px solid var(--line);
+                 border-radius:8px; padding:8px 10px; font-size:14px }
+  input[type=text],input[type=number] { width:170px }
+  pre#log { background:#0c0d12; border:1px solid var(--line); border-radius:8px;
+            padding:12px; height:300px; overflow:auto; margin:0;
+            font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;
+            white-space:pre-wrap; word-break:break-word }
+  .muted { color:var(--muted); font-size:13px }
+  .tag { background:#242736; border:1px solid var(--line); border-radius:6px;
+         padding:3px 8px; font-size:13px; display:inline-flex; gap:7px; align-items:center }
+  .tag button { background:none; color:var(--muted); padding:0 2px; font-size:15px }
+  #toast { position:fixed; left:50%; transform:translateX(-50%); bottom:24px;
+           background:#252938; border:1px solid var(--line); padding:11px 16px;
+           border-radius:10px; opacity:0; transition:opacity .2s; max-width:90vw }
+  #toast.show { opacity:1 }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px }
+  @media (max-width:680px){ .grid2{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+<header>
+  <h1>Whatnot Radar</h1>
+  <span class="pill"><span id="dot" class="dot"></span><span id="state">…</span></span>
+  <span class="pill" id="session">session …</span>
+  <span style="flex:1"></span>
+  <button id="btnStart">Start</button>
+  <button id="btnStop" class="ghost">Stop</button>
+  <button id="btnRestart" class="ghost">Restart</button>
+</header>
+
+<div class="wrap">
+  <div class="card">
+    <h2>Live log</h2>
+    <pre id="log">loading…</pre>
+    <div class="row" style="margin-top:10px">
+      <label class="muted"><input type="checkbox" id="follow" checked> follow</label>
+      <span class="muted" id="uptime"></span>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <h2>Notifications</h2>
+      <div class="row">
+        <select id="notifier"><option value="bark">Bark (iOS)</option>
+          <option value="ntfy">ntfy</option></select>
+        <input type="text" id="notifKey" placeholder="key / topic">
+        <button class="ghost" onclick="saveNotifier()">Save</button>
+        <button class="ghost" onclick="post('/api/test-notification')">Send test</button>
+      </div>
+      <p class="muted" id="notifState" style="margin:10px 0 0"></p>
+    </div>
+
+    <div class="card">
+      <h2>Browser profile</h2>
+      <p class="muted" id="profSize">…</p>
+      <div class="row">
+        <button class="ghost" onclick="loginStart()">Login</button>
+        <button class="ghost" id="btnLoginDone" style="display:none"
+                onclick="post('/api/login/finish')">I'm done</button>
+        <button class="ghost" onclick="confirmPost('/api/clear-cache',
+          'Clear cached files? You stay logged in.')">Clear cache</button>
+        <button class="danger" onclick="confirmPost('/api/clear-site-data',
+          'This LOGS YOU OUT of Whatnot and you must log in again. Continue?')">
+          Clear site data</button>
+      </div>
+      <p class="muted" style="margin:10px 0 0">Cache is disposable and regrows.
+        Site data is your login.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Blocked sellers</h2>
+    <div class="row">
+      <input type="text" id="blockName" placeholder="seller username">
+      <button class="ghost" onclick="addSeller('blacklist')">Block</button>
+    </div>
+    <div class="row" id="blacklist" style="margin-top:12px"></div>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <h2>Discovery</h2>
+      <div class="row">
+        <select id="category"></select>
+        <select id="countries" multiple size="4" style="min-width:150px"></select>
+        <button class="ghost" onclick="saveSource()">Apply</button>
+      </div>
+      <p class="muted" id="sourceNow" style="margin:10px 0 0"></p>
+    </div>
+
+    <div class="card">
+      <h2>Tuning</h2>
+      <div class="row">
+        <label class="muted">tabs <input type="number" id="maxTabs" min="1" max="8"
+               style="width:70px"></label>
+        <label class="muted">seller poll s <input type="number" id="sellerPoll"
+               min="60" style="width:80px"></label>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="ghost" onclick="saveTuning()">Save</button>
+        <span class="muted">higher = gentler on Whatnot</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+let logEl = $('#log');
+
+function toast(msg, bad) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.style.borderColor = bad ? 'var(--bad)' : 'var(--line)';
+  t.classList.add('show');
+  clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('show'), 3600);
+}
+
+async function post(url, body) {
+  try {
+    const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'},
+                               body: JSON.stringify(body || {})});
+    const j = await r.json();
+    toast(j.error || j.message || 'ok', !r.ok);
+    if (j.restart_needed) toast((j.message||'saved') + ' — restart to apply');
+    refresh();
+    return j;
+  } catch (e) { toast(String(e), true); }
+}
+function confirmPost(url, question) { if (confirm(question)) post(url); }
+
+function fmtBytes(b) {
+  if (b > 1e9) return (b/1e9).toFixed(2) + ' GB';
+  if (b > 1e6) return (b/1e6).toFixed(0) + ' MB';
+  return (b/1e3).toFixed(0) + ' KB';
+}
+
+async function refresh() {
+  const s = await (await fetch('/api/status')).json();
+  const running = s.control.running;
+  $('#dot').style.background = running ? 'var(--ok)' : 'var(--muted)';
+  $('#state').textContent = running ? 'running' : 'stopped';
+  $('#btnStart').disabled = running; $('#btnStop').disabled = !running;
+  $('#uptime').textContent = s.control.uptime_seconds
+    ? 'up ' + Math.floor(s.control.uptime_seconds/60) + ' min' : '';
+
+  const sess = s.session;
+  $('#session').textContent = sess.logged_in ? 'logged in' : 'not logged in';
+  $('#session').style.borderColor = sess.logged_in ? 'var(--ok)' : 'var(--warn)';
+
+  $('#profSize').textContent =
+    `profile ${fmtBytes(s.profile.total_bytes)} — cache ${fmtBytes(s.profile.cache_bytes)}` +
+    (s.profile.cache_bytes > 3e8 ? '  ⚠️ worth clearing' : '');
+  $('#btnLoginDone').style.display = s.login_in_progress ? '' : 'none';
+
+  if (s.control.foreign && s.control.foreign.length)
+    toast('another radar is running outside this project — stop it first', true);
+
+  const lg = await (await fetch('/api/log?lines=300')).json();
+  const atBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 40;
+  logEl.textContent = lg.lines.join('\n') || '(empty)';
+  if ($('#follow').checked && atBottom) logEl.scrollTop = logEl.scrollHeight;
+}
+
+async function loadConfig() {
+  const c = await (await fetch('/api/config')).json();
+  $('#notifier').value = c.notifier || 'bark';
+  $('#notifState').textContent = (c.notifier === 'ntfy')
+    ? (c.ntfy_topic_set ? 'ntfy topic is set' : 'no ntfy topic yet')
+    : (c.bark_key_set ? 'Bark key is set' : 'no Bark key yet');
+  $('#maxTabs').value = c.max_concurrent_streams ?? 3;
+  $('#sellerPoll').value = c.seller_poll_seconds ?? 90;
+
+  const bl = $('#blacklist'); bl.innerHTML = '';
+  (c.blacklist || []).forEach(name => {
+    const el = document.createElement('span');
+    el.className = 'tag';
+    el.innerHTML = `${name} <button title="unblock">×</button>`;
+    el.querySelector('button').onclick = () =>
+      post('/api/seller', {seller:name, list_name:'blacklist', remove:true}).then(loadConfig);
+    bl.appendChild(el);
+  });
+  if (!(c.blacklist||[]).length) bl.innerHTML = '<span class="muted">none</span>';
+
+  const src = (c.discovery && c.discovery.sources || [])[0];
+  $('#sourceNow').textContent = src ? 'current: ' + src.name : 'no discovery source set';
+
+  const p = await (await fetch('/api/presets')).json();
+  const cat = $('#category'); cat.innerHTML = '';
+  Object.keys(p.categories).forEach(k => cat.add(new Option(k, k)));
+  const co = $('#countries'); co.innerHTML = '';
+  Object.entries(p.countries).forEach(([code, label]) => {
+    const o = new Option(label, code);
+    if (src && src.filters?.[0]?.values?.includes(code)) o.selected = true;
+    co.add(o);
+  });
+}
+
+function addSeller(list) {
+  const v = $('#blockName').value.trim();
+  if (!v) return;
+  post('/api/seller', {seller:v, list_name:list}).then(() => {
+    $('#blockName').value = ''; loadConfig();
+  });
+}
+function saveNotifier() {
+  const n = $('#notifier').value, key = $('#notifKey').value.trim();
+  const patch = {notifier:n};
+  if (key) patch[n === 'bark' ? 'bark_key' : 'ntfy_topic'] = key;
+  post('/api/config', patch).then(() => { $('#notifKey').value=''; loadConfig(); });
+}
+function saveTuning() {
+  post('/api/config', {max_concurrent_streams:+$('#maxTabs').value,
+                       seller_poll_seconds:+$('#sellerPoll').value});
+}
+function saveSource() {
+  const countries = [...$('#countries').selectedOptions].map(o => o.value);
+  post('/api/discovery-source', {category:$('#category').value, countries})
+    .then(loadConfig);
+}
+async function loginStart() { await post('/api/login/start'); }
+
+$('#btnStart').onclick = () => post('/api/start');
+$('#btnStop').onclick  = () => post('/api/stop');
+$('#btnRestart').onclick = () => post('/api/restart');
+
+refresh(); loadConfig();
+setInterval(refresh, 2500);
+</script>
+</body>
+</html>
