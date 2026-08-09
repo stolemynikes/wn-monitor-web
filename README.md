@@ -96,15 +96,28 @@ copy config.example.json config.json
 ### Step 5: Open the control panel
 
 ```bash
-python3 web.py
+.venv/bin/python web.py
 ```
 
-You'll see a line saying it's running. Now open your web browser and go to:
+Your web browser should open by itself at **http://127.0.0.1:8765**, showing a
+dark page called **Whatnot Radar**. If it doesn't open, type that address into
+your browser yourself.
 
-**http://127.0.0.1:8765**
-
-You should see a dark page called **Whatnot Radar**. That's your control panel.
 Leave the text window open — closing it turns the panel off.
+
+> **Why `.venv/bin/python` and not just `python`?** The setup in Step 4 put all
+> the parts into a folder called `.venv`. Plain `python` doesn't know about
+> them, and you'd get an error like `No module named 'fastapi'`. Using the full
+> path always works. (On Windows: `.venv\Scripts\python web.py`.)
+
+**From now on you don't need to type anything.** To open the panel again later,
+just double-click:
+
+- **Mac** → `start-panel.command`
+- **Windows** → `start-panel.bat`
+
+The first time on a Mac, macOS may say it can't verify the file. Right-click it
+→ **Open** → **Open** once, and it'll work normally after that.
 
 ---
 

@@ -12,11 +12,28 @@ import argparse
 import json
 import subprocess
 import sys
+import threading
+import time
+import webbrowser
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel
+try:
+    from fastapi import FastAPI, HTTPException
+    from fastapi.responses import FileResponse, JSONResponse
+    from pydantic import BaseModel
+except ModuleNotFoundError as exc:  # nearly always: venv not activated
+    _venv = Path(__file__).resolve().parent / ".venv"
+    _py = _venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    print(f"\n  Missing '{exc.name}' — the setup packages aren't loaded.\n")
+    if _py.exists():
+        print("  You're using the wrong Python. Run this instead:\n")
+        print(f"      {_py} web.py\n")
+    else:
+        print("  It looks like setup hasn't finished. From this folder run:\n")
+        print("      python3 -m venv .venv")
+        print("      .venv/bin/pip install -r requirements.txt")
+        print("      .venv/bin/playwright install chromium\n")
+    sys.exit(1)
 
 import control
 import profile_tools
@@ -249,10 +266,22 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--no-browser", action="store_true",
+                    help="don't open the panel automatically")
     args = ap.parse_args()
     if args.host not in ("127.0.0.1", "localhost"):
         print(f"WARNING: binding {args.host} — only do this on a private "
               "network such as Tailscale.")
+
+    url = f"http://127.0.0.1:{args.port}"
+    print(f"\n  Whatnot Radar panel:  {url}")
+    print("  Leave this window open. Press Ctrl+C to shut the panel down.\n")
+    if not args.no_browser:
+        # Opening it for them: "nothing happened" is otherwise the most common
+        # first-run confusion — the server starts but never shows anything.
+        threading.Thread(target=lambda: (time.sleep(1.5), webbrowser.open(url)),
+                         daemon=True).start()
+
     import uvicorn
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
 
