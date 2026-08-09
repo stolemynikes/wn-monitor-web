@@ -1,0 +1,7 @@
+config.json
+state.json
+# browser profiles, incl. any .backup copies (session cookies!)
+whatnot-profile*
+.venv/
+__pycache__/
+notifications.log

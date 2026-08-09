@@ -1,0 +1,33 @@
+{
+  "sellers": [],
+  "blacklist": [],
+  "blacklist_temp": {},
+  "bought_sellers": [],
+  "foreign_sellers": [],
+  "my_username": "YOUR_WHATNOT_USERNAME",
+
+  "notifier": "bark",
+  "bark_key": "",
+  "ntfy_topic": "CHANGE-ME-long-random-string",
+  "ntfy_server": "https://ntfy.sh",
+
+  "seller_poll_seconds": 90,
+  "giveaway_poll_seconds": 10,
+  "max_concurrent_streams": 3,
+  "pinned_extra_tabs": 0,
+  "watch_giveaways": true,
+  "headless": false,
+
+  "discovery": {
+    "enabled": true,
+    "poll_seconds": 300,
+    "notify_new_streams": false,
+    "sources": [
+      {
+        "name": "Pokémon cards shipped from NL",
+        "feedId": "CATEGORY_FEED_V2:TGl2ZXN0cmVhbVRhZ05vZGU6OTA3",
+        "filters": [{ "field": "userCountry.keyword", "values": ["NL"] }]
+      }
+    ]
+  }
+}
