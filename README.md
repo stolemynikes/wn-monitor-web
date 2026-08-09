@@ -234,8 +234,12 @@ but is silent, look in Settings → Notifications → Bark and turn sounds on.
 You skipped the `cp config.example.json config.json` line in Step 4.
 
 **The panel page won't load.**
-The text window must stay open with `python3 web.py` running. If you closed it,
-open a new one, `cd wn-monitor-web`, `source .venv/bin/activate`, `python3 web.py`.
+The panel only runs while its window is open. Double-click `start-panel.command`
+(Mac) or `start-panel.bat` (Windows) to start it again.
+
+**It says `No module named 'fastapi'` (or similar).**
+You used the wrong Python. Use the full path — `.venv/bin/python web.py` — or
+just double-click the launcher, which always gets it right.
 
 **It says "refusing to start: another radar is running".**
 You already have one running somewhere. Two at once doubles the traffic and gets
@@ -264,7 +268,7 @@ your own notification app.
 
 The panel is only reachable from your own machine. If you want to use it from
 your phone, put both devices on a private network like
-[Tailscale](https://tailscale.com) and start it with `python3 web.py --host
+[Tailscale](https://tailscale.com) and start it with `.venv/bin/python web.py --host
 0.0.0.0`. **Never put it on the open internet** — it can open a browser and read
 your settings.
 
