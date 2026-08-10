@@ -5,261 +5,459 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Whatnot Radar</title>
 <style>
-  :root {
-    --bg:#12131a; --panel:#1b1d27; --line:#2b2e3b; --ink:#e7e9f2;
-    --muted:#9aa0b4; --ok:#3ecf8e; --warn:#f0b429; --bad:#f2565f; --accent:#6c8cff;
+  :root{
+    --bg:#0F172A; --surface:#1E293B; --surface-2:#172033; --line:#334155;
+    --ink:#F8FAFC; --muted:#94A3B8; --ok:#22C55E; --warn:#F59E0B;
+    --bad:#EF4444; --accent:#6366F1; --gold:#FBBF24;
+    --r:10px; --t:180ms cubic-bezier(.4,0,.2,1);
+    --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px;
   }
-  * { box-sizing:border-box }
-  body { margin:0; background:var(--bg); color:var(--ink);
-         font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-  header { padding:18px 20px; border-bottom:1px solid var(--line);
-           display:flex; align-items:center; gap:14px; flex-wrap:wrap }
-  h1 { font-size:17px; margin:0; font-weight:650 }
-  .wrap { max-width:900px; margin:0 auto; padding:20px; display:grid; gap:16px }
-  .card { background:var(--panel); border:1px solid var(--line);
-          border-radius:12px; padding:16px }
-  .card h2 { font-size:13px; margin:0 0 12px; color:var(--muted);
-             text-transform:uppercase; letter-spacing:.07em; font-weight:600 }
-  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center }
-  button { background:var(--accent); color:#fff; border:0; border-radius:8px;
-           padding:9px 14px; font-size:14px; font-weight:600; cursor:pointer }
-  button.ghost { background:transparent; color:var(--ink); border:1px solid var(--line) }
-  button.danger { background:var(--bad) }
-  button:disabled { opacity:.45; cursor:not-allowed }
-  .dot { width:9px; height:9px; border-radius:50%; display:inline-block }
-  .pill { display:inline-flex; align-items:center; gap:7px; padding:5px 11px;
-          border:1px solid var(--line); border-radius:999px; font-size:13px }
-  input,select { background:#111219; color:var(--ink); border:1px solid var(--line);
-                 border-radius:8px; padding:8px 10px; font-size:14px }
-  input[type=text],input[type=number] { width:170px }
-  pre#log { background:#0c0d12; border:1px solid var(--line); border-radius:8px;
-            padding:12px; height:300px; overflow:auto; margin:0;
-            font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;
-            white-space:pre-wrap; word-break:break-word }
-  .muted { color:var(--muted); font-size:13px }
-  .tag { background:#242736; border:1px solid var(--line); border-radius:6px;
-         padding:3px 8px; font-size:13px; display:inline-flex; gap:7px; align-items:center }
-  .tag button { background:none; color:var(--muted); padding:0 2px; font-size:15px }
-  #toast { position:fixed; left:50%; transform:translateX(-50%); bottom:24px;
-           background:#252938; border:1px solid var(--line); padding:11px 16px;
-           border-radius:10px; opacity:0; transition:opacity .2s; max-width:90vw }
-  #toast.show { opacity:1 }
-  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px }
-  @media (max-width:680px){ .grid2{grid-template-columns:1fr} }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--bg); color:var(--ink); font:16px/1.5 -apple-system,
+       BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+       -webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,SFMono-Regular,"Fira Code",Menlo,monospace;
+        font-variant-numeric:tabular-nums}
+
+  /* ---------- header ---------- */
+  header{position:sticky; top:0; z-index:40; background:rgba(15,23,42,.92);
+         backdrop-filter:blur(8px); border-bottom:1px solid var(--line)}
+  .hbar{max-width:960px; margin:0 auto; padding:var(--s3) var(--s4);
+        display:flex; align-items:center; gap:var(--s3); flex-wrap:wrap}
+  h1{font-size:16px; font-weight:650; margin:0; letter-spacing:-.01em}
+  .status{display:inline-flex; align-items:center; gap:var(--s2);
+          padding:var(--s1) 10px; border:1px solid var(--line);
+          border-radius:999px; font-size:13px; font-weight:550}
+  .status.on{border-color:var(--ok); color:var(--ok)}
+  .status.off{color:var(--muted)}
+  .dot{width:8px; height:8px; border-radius:50%; background:currentColor; flex:none}
+  .status.on .dot{animation:pulse 2s ease-in-out infinite}
+  @keyframes pulse{50%{opacity:.35}}
+  .spacer{flex:1 1 auto}
+
+  /* ---------- layout ---------- */
+  main{max-width:960px; margin:0 auto; padding:var(--s4);
+       display:grid; gap:var(--s4)}
+  .grid{display:grid; gap:var(--s4); grid-template-columns:repeat(2,minmax(0,1fr))}
+  @media (max-width:760px){ .grid{grid-template-columns:1fr} }
+
+  .card{background:var(--surface); border:1px solid var(--line);
+        border-left:3px solid var(--line); border-radius:var(--r);
+        padding:var(--s4); transition:border-color var(--t)}
+  /* the "is this set up?" signal the whole panel hangs on */
+  .card.ready{border-left-color:var(--ok)}
+  .card.todo{border-left-color:var(--warn)}
+  .card h2{display:flex; align-items:center; gap:var(--s2); margin:0 0 var(--s3);
+           font-size:12px; font-weight:650; letter-spacing:.08em;
+           text-transform:uppercase; color:var(--muted)}
+  .card h2 .badge{margin-left:auto; text-transform:none; letter-spacing:0;
+                  font-size:12px; font-weight:600; padding:2px 8px;
+                  border-radius:999px; border:1px solid var(--line); color:var(--muted)}
+  .badge.ok{color:var(--ok); border-color:color-mix(in srgb,var(--ok) 45%,transparent);
+            background:color-mix(in srgb,var(--ok) 12%,transparent)}
+  .badge.todo{color:var(--warn); border-color:color-mix(in srgb,var(--warn) 45%,transparent);
+              background:color-mix(in srgb,var(--warn) 12%,transparent)}
+
+  .saved{font-size:13px; color:var(--muted); margin:var(--s3) 0 0;
+         display:flex; align-items:center; gap:6px}
+  .saved b{color:var(--ink); font-weight:600}
+
+  /* ---------- controls ---------- */
+  .row{display:flex; gap:var(--s2); flex-wrap:wrap; align-items:center}
+  button{min-height:44px; padding:0 var(--s4); border:0; border-radius:var(--r);
+         background:var(--accent); color:#fff; font-size:15px; font-weight:600;
+         cursor:pointer; transition:filter var(--t),transform var(--t);
+         touch-action:manipulation}
+  button:hover:not(:disabled){filter:brightness(1.12)}
+  button:active:not(:disabled){transform:scale(.98)}
+  button.ghost{background:transparent; border:1px solid var(--line); color:var(--ink)}
+  button.ghost:hover:not(:disabled){background:var(--surface-2)}
+  button.danger{background:transparent; border:1px solid
+                color-mix(in srgb,var(--bad) 55%,transparent); color:var(--bad)}
+  button.danger:hover:not(:disabled){background:color-mix(in srgb,var(--bad) 14%,transparent)}
+  button.sm{min-height:34px; padding:0 var(--s3); font-size:13px}
+  button:disabled{opacity:.4; cursor:not-allowed}
+  :focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:6px}
+
+  label.f{display:flex; flex-direction:column; gap:5px; font-size:13px;
+          color:var(--muted); font-weight:550}
+  input,select{min-height:44px; background:var(--surface-2); color:var(--ink);
+        border:1px solid var(--line); border-radius:var(--r);
+        padding:0 var(--s3); font-size:16px; transition:border-color var(--t)}
+  input:focus,select:focus{border-color:var(--accent); outline:none}
+  select[multiple]{min-height:120px; padding:var(--s2)}
+  .hint{font-size:12px; color:var(--muted); margin:6px 0 0}
+
+  .tags{display:flex; flex-wrap:wrap; gap:6px; margin-top:var(--s3)}
+  .tag{display:inline-flex; align-items:center; gap:6px; background:var(--surface-2);
+       border:1px solid var(--line); border-radius:999px; padding:5px 6px 5px 12px;
+       font-size:13px}
+  .tag button{min-height:26px; width:26px; padding:0; background:none;
+              color:var(--muted); font-size:16px; line-height:1; border-radius:50%}
+  .tag button:hover{color:var(--bad); background:color-mix(in srgb,var(--bad) 15%,transparent)}
+  .empty{color:var(--muted); font-size:13px; font-style:italic; margin-top:var(--s3)}
+
+  /* ---------- log ---------- */
+  #log{background:#0B1120; border:1px solid var(--line); border-radius:var(--r);
+       padding:var(--s3); height:320px; overflow:auto; margin:0;
+       font:12.5px/1.6 ui-monospace,SFMono-Regular,"Fira Code",Menlo,monospace;
+       white-space:pre-wrap; word-break:break-word}
+  #log div{padding:1px 0}
+  .l-time{color:#475569}
+  .l-give{color:var(--ok); font-weight:600}
+  .l-win{color:var(--gold); font-weight:700}
+  .l-bad{color:var(--bad); font-weight:600}
+  .l-dim{color:#64748B}
+
+  /* ---------- misc ---------- */
+  .alert{display:flex; gap:var(--s3); align-items:flex-start; padding:var(--s3);
+         border-radius:var(--r); font-size:14px; border:1px solid}
+  .alert.warn{border-color:color-mix(in srgb,var(--warn) 50%,transparent);
+              background:color-mix(in srgb,var(--warn) 10%,transparent); color:#FDE68A}
+  .alert.bad{border-color:color-mix(in srgb,var(--bad) 50%,transparent);
+             background:color-mix(in srgb,var(--bad) 10%,transparent); color:#FECACA}
+  code{background:var(--surface-2); border:1px solid var(--line); border-radius:6px;
+       padding:2px 6px; font-size:12.5px; word-break:break-all}
+  .cmd{display:flex; gap:var(--s2); align-items:center; margin-top:var(--s2)}
+  .cmd code{flex:1; padding:10px var(--s3)}
+  svg{width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:2;
+      stroke-linecap:round; stroke-linejoin:round; flex:none}
+  #toast{position:fixed; left:50%; bottom:24px; transform:translate(-50%,12px);
+         background:var(--surface); border:1px solid var(--line); color:var(--ink);
+         padding:12px 18px; border-radius:var(--r); font-size:14px; z-index:60;
+         opacity:0; pointer-events:none; transition:opacity var(--t),transform var(--t);
+         max-width:calc(100vw - 32px); box-shadow:0 10px 30px rgba(0,0,0,.5)}
+  #toast.show{opacity:1; transform:translate(-50%,0)}
+  #toast.bad{border-color:var(--bad)}
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none !important; transition:none !important}
+  }
 </style>
 </head>
 <body>
 <header>
-  <h1>Whatnot Radar</h1>
-  <span class="pill"><span id="dot" class="dot"></span><span id="state">…</span></span>
-  <span class="pill" id="session">session …</span>
-  <span style="flex:1"></span>
-  <button id="btnStart">Start</button>
-  <button id="btnStop" class="ghost">Stop</button>
-  <button id="btnRestart" class="ghost">Restart</button>
+  <div class="hbar">
+    <h1>Whatnot Radar</h1>
+    <span class="status off" id="pill"><span class="dot"></span><span id="stateTxt">checking…</span></span>
+    <span class="spacer"></span>
+    <button id="btnStart">Start</button>
+    <button id="btnStop" class="ghost">Stop</button>
+  </div>
 </header>
 
-<div class="wrap">
-  <div class="card">
-    <h2>Live log</h2>
-    <pre id="log">loading…</pre>
-    <div class="row" style="margin-top:10px">
-      <label class="muted"><input type="checkbox" id="follow" checked> follow</label>
-      <span class="muted" id="uptime"></span>
-    </div>
-  </div>
+<main>
+  <div id="alerts"></div>
 
-  <div class="grid2">
-    <div class="card">
-      <h2>Notifications</h2>
+  <!-- SETUP -->
+  <section class="card" id="cardSetup">
+    <h2>Setup <span class="badge" id="setupBadge">–</span></h2>
+    <div id="setupList" style="display:grid; gap:8px; font-size:14px"></div>
+  </section>
+
+  <!-- LOG -->
+  <section class="card">
+    <h2>Activity <span class="badge" id="uptime"></span></h2>
+    <pre id="log" aria-live="polite" aria-label="Activity log">loading…</pre>
+    <div class="row" style="margin-top:var(--s3)">
+      <label class="row" style="gap:6px; font-size:13px; color:var(--muted)">
+        <input type="checkbox" id="follow" checked style="min-height:auto; width:16px; height:16px">
+        auto-scroll
+      </label>
+    </div>
+  </section>
+
+  <div class="grid">
+    <!-- NOTIFICATIONS -->
+    <section class="card" id="cardNotif">
+      <h2>Phone alerts <span class="badge" id="notifBadge">–</span></h2>
       <div class="row">
-        <select id="notifier"><option value="bark">Bark (iOS)</option>
-          <option value="ntfy">ntfy</option></select>
-        <input type="text" id="notifKey" placeholder="key / topic">
-        <button class="ghost" onclick="saveNotifier()">Save</button>
-        <button class="ghost" onclick="post('/api/test-notification')">Send test</button>
+        <label class="f" style="flex:1; min-width:130px">Service
+          <select id="notifier">
+            <option value="bark">Bark (iPhone)</option>
+            <option value="ntfy">ntfy</option>
+          </select>
+        </label>
+        <label class="f" style="flex:2; min-width:160px"><span id="keyLabel">Bark key</span>
+          <input type="text" id="notifKey" placeholder="paste to change"
+                 autocomplete="off" spellcheck="false">
+        </label>
       </div>
-      <p class="muted" id="notifState" style="margin:10px 0 0"></p>
-    </div>
+      <p class="saved" id="notifSaved"></p>
+      <div class="row" style="margin-top:var(--s3)">
+        <button class="ghost sm" onclick="saveNotifier()">Save</button>
+        <button class="ghost sm" onclick="post('/api/test-notification')">Send test</button>
+      </div>
+    </section>
 
-    <div class="card">
-      <h2>Browser profile</h2>
-      <p class="muted" id="profSize">…</p>
-      <div class="row">
-        <button class="ghost" onclick="loginStart()">Login</button>
-        <button class="ghost" id="btnLoginDone" style="display:none"
+    <!-- BROWSER -->
+    <section class="card" id="cardLogin">
+      <h2>Whatnot login <span class="badge" id="loginBadge">–</span></h2>
+      <p class="saved" id="sessionSaved"></p>
+      <p class="saved" id="profSize"></p>
+      <div class="row" style="margin-top:var(--s3)">
+        <button class="ghost sm" onclick="post('/api/login/start')">Log in</button>
+        <button class="sm" id="btnDone" style="display:none"
                 onclick="post('/api/login/finish')">I'm done</button>
-        <button class="ghost" onclick="confirmPost('/api/clear-cache',
-          'Clear cached files? You stay logged in.')">Clear cache</button>
-        <button class="danger" onclick="confirmPost('/api/clear-site-data',
-          'This LOGS YOU OUT of Whatnot and you must log in again. Continue?')">
-          Clear site data</button>
+        <button class="ghost sm" id="btnCache" onclick="confirmPost('/api/clear-cache',
+          'Delete cached files? You stay logged in.')">Clear cache</button>
+        <button class="danger sm" onclick="confirmPost('/api/clear-site-data',
+          'This LOGS YOU OUT of Whatnot. You will have to log in again. Continue?')">
+          Log out</button>
       </div>
-      <p class="muted" style="margin:10px 0 0">Cache is disposable and regrows.
-        Site data is your login.</p>
-    </div>
+    </section>
+
+    <!-- DISCOVERY -->
+    <section class="card" id="cardDisc">
+      <h2>What to watch <span class="badge" id="discBadge">–</span></h2>
+      <div class="row">
+        <label class="f" style="flex:1; min-width:140px">Category
+          <select id="category"></select>
+        </label>
+        <label class="f" style="flex:1; min-width:140px">Ships from
+          <select id="countries" multiple aria-describedby="ctryHint"></select>
+        </label>
+      </div>
+      <p class="hint" id="ctryHint">Hold ⌘/Ctrl to pick several.</p>
+      <p class="saved" id="discSaved"></p>
+      <div class="row" style="margin-top:var(--s3)">
+        <button class="ghost sm" onclick="saveSource()">Save</button>
+      </div>
+    </section>
+
+    <!-- TUNING -->
+    <section class="card ready">
+      <h2>Intensity</h2>
+      <div class="row">
+        <label class="f">Streams at once
+          <input type="number" id="maxTabs" min="1" max="8" style="width:90px">
+        </label>
+        <label class="f">Check every (s)
+          <input type="number" id="sellerPoll" min="60" step="10" style="width:100px">
+        </label>
+      </div>
+      <p class="hint">Higher numbers are greedier and risk getting blocked by
+        Whatnot. 3 streams is a safe default.</p>
+      <div class="row" style="margin-top:var(--s3)">
+        <button class="ghost sm" onclick="saveTuning()">Save</button>
+      </div>
+    </section>
   </div>
 
-  <div class="card">
-    <h2>Blocked sellers</h2>
+  <!-- BLOCKED -->
+  <section class="card">
+    <h2>Blocked sellers <span class="badge" id="blCount">0</span></h2>
     <div class="row">
-      <input type="text" id="blockName" placeholder="seller username">
-      <button class="ghost" onclick="addSeller('blacklist')">Block</button>
+      <input type="text" id="blockName" placeholder="seller username"
+             autocomplete="off" spellcheck="false" style="flex:1; min-width:180px"
+             onkeydown="if(event.key==='Enter')addSeller()">
+      <button class="ghost" onclick="addSeller()">Block</button>
     </div>
-    <div class="row" id="blacklist" style="margin-top:12px"></div>
-  </div>
+    <div class="tags" id="blacklist"></div>
+  </section>
 
-  <div class="grid2">
-    <div class="card">
-      <h2>Discovery</h2>
-      <div class="row">
-        <select id="category"></select>
-        <select id="countries" multiple size="4" style="min-width:150px"></select>
-        <button class="ghost" onclick="saveSource()">Apply</button>
-      </div>
-      <p class="muted" id="sourceNow" style="margin:10px 0 0"></p>
-    </div>
+  <!-- REMOTE -->
+  <section class="card">
+    <h2>Control from your phone</h2>
+    <p class="hint" style="margin-top:0">Works Android→Mac and iPhone→Windows —
+      any SSH app, or an iOS Shortcut you can put on your home screen.
+      <span id="sshHint"></span></p>
+    <div id="sshCmds"></div>
+  </section>
+</main>
 
-    <div class="card">
-      <h2>Tuning</h2>
-      <div class="row">
-        <label class="muted">tabs <input type="number" id="maxTabs" min="1" max="8"
-               style="width:70px"></label>
-        <label class="muted">seller poll s <input type="number" id="sellerPoll"
-               min="60" style="width:80px"></label>
-      </div>
-      <div class="row" style="margin-top:10px">
-        <button class="ghost" onclick="saveTuning()">Save</button>
-        <span class="muted">higher = gentler on Whatnot</span>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 
 <script>
 const $ = s => document.querySelector(s);
-let logEl = $('#log');
+const ICON = {
+  ok:'<svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>',
+  todo:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>',
+  copy:'<svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>',
+};
 
-function toast(msg, bad) {
-  const t = $('#toast');
-  t.textContent = msg;
-  t.style.borderColor = bad ? 'var(--bad)' : 'var(--line)';
-  t.classList.add('show');
-  clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('show'), 3600);
+function toast(msg, bad){
+  const t=$('#toast'); t.textContent=msg; t.classList.toggle('bad',!!bad);
+  t.classList.add('show'); clearTimeout(t._t);
+  t._t=setTimeout(()=>t.classList.remove('show'),4000);
 }
-
-async function post(url, body) {
-  try {
-    const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'},
-                               body: JSON.stringify(body || {})});
-    const j = await r.json();
-    toast(j.error || j.message || 'ok', !r.ok);
-    if (j.restart_needed) toast((j.message||'saved') + ' — restart to apply');
-    refresh();
+async function post(url, body){
+  try{
+    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},
+                            body:JSON.stringify(body||{})});
+    const j=await r.json();
+    toast(j.error || j.message || 'Done', !r.ok);
+    refresh(); loadConfig();
     return j;
-  } catch (e) { toast(String(e), true); }
+  }catch(e){ toast(String(e),true); }
 }
-function confirmPost(url, question) { if (confirm(question)) post(url); }
-
-function fmtBytes(b) {
-  if (b > 1e9) return (b/1e9).toFixed(2) + ' GB';
-  if (b > 1e6) return (b/1e6).toFixed(0) + ' MB';
-  return (b/1e3).toFixed(0) + ' KB';
+const confirmPost=(u,q)=>{ if(confirm(q)) post(u); };
+const fmt=b => b>1e9?(b/1e9).toFixed(2)+' GB' : b>1e6?(b/1e6).toFixed(0)+' MB'
+                                              : (b/1e3).toFixed(0)+' KB';
+function setCard(card, badge, ready, text){
+  $(card).classList.toggle('ready',ready); $(card).classList.toggle('todo',!ready);
+  const b=$(badge); b.textContent=ready?'set up':'needs setup';
+  b.className='badge '+(ready?'ok':'todo');
+  return text;
 }
 
-async function refresh() {
-  const s = await (await fetch('/api/status')).json();
-  const running = s.control.running;
-  $('#dot').style.background = running ? 'var(--ok)' : 'var(--muted)';
-  $('#state').textContent = running ? 'running' : 'stopped';
-  $('#btnStart').disabled = running; $('#btnStop').disabled = !running;
+/* ---------- log colouring: skim for what matters ---------- */
+function renderLog(lines){
+  const el=$('#log');
+  const near = el.scrollTop+el.clientHeight >= el.scrollHeight-50;
+  el.innerHTML = lines.length ? lines.map(l=>{
+    const m=l.match(/^(\[[\d:]+\]\s*)?(.*)$/s);
+    const time=m[1]||'', rest=m[2]||'';
+    let cls='';
+    if(/challenge|failed|error|refus|stopped:/i.test(rest)) cls='l-bad';
+    else if(/WE WON|🏆/.test(rest)) cls='l-win';
+    else if(/GIVEAWAY —|BUYERS GIVEAWAY/.test(rest)) cls='l-give';
+    else if(/rotating|opening watch|closing tab|offline|discovery:/i.test(rest)) cls='l-dim';
+    const esc=s=>s.replace(/[<&]/g,c=>c==='<'?'&lt;':'&amp;');
+    return `<div><span class="l-time">${esc(time)}</span><span class="${cls}">${esc(rest)}</span></div>`;
+  }).join('') : '<div class="l-dim">Nothing yet — press Start.</div>';
+  if($('#follow').checked && near) el.scrollTop=el.scrollHeight;
+}
+
+async function refresh(){
+  let s; try{ s=await (await fetch('/api/status')).json(); }catch{ return; }
+  const run=s.control.running;
+  const pill=$('#pill');
+  pill.className='status '+(run?'on':'off');
+  $('#stateTxt').textContent = run?'running':'stopped';
+  $('#btnStart').disabled=run; $('#btnStop').disabled=!run;
   $('#uptime').textContent = s.control.uptime_seconds
-    ? 'up ' + Math.floor(s.control.uptime_seconds/60) + ' min' : '';
+    ? 'up '+Math.floor(s.control.uptime_seconds/60)+'m' : '';
 
-  const sess = s.session;
-  $('#session').textContent = sess.logged_in ? 'logged in' : 'not logged in';
-  $('#session').style.borderColor = sess.logged_in ? 'var(--ok)' : 'var(--warn)';
-
+  // login card
+  const sess=s.session;
+  setCard('#cardLogin','#loginBadge',sess.logged_in);
+  $('#sessionSaved').innerHTML = sess.logged_in
+    ? `${ICON.ok} Logged in <b>&nbsp;(${sess.cookie_count} cookies)</b>`
+    : `${ICON.todo} ${sess.detail}`;
+  const cache=s.profile.cache_bytes;
   $('#profSize').textContent =
-    `profile ${fmtBytes(s.profile.total_bytes)} — cache ${fmtBytes(s.profile.cache_bytes)}` +
-    (s.profile.cache_bytes > 3e8 ? '  ⚠️ worth clearing' : '');
-  $('#btnLoginDone').style.display = s.login_in_progress ? '' : 'none';
+    `Profile ${fmt(s.profile.total_bytes)} · cache ${fmt(cache)}`;
+  $('#btnCache').textContent = cache>3e8 ? `Clear cache (${fmt(cache)})` : 'Clear cache';
+  $('#btnDone').style.display = s.login_in_progress?'':'none';
 
-  if (s.control.foreign && s.control.foreign.length)
-    toast('another radar is running outside this project — stop it first', true);
+  // blocking alerts, not just a toast that disappears
+  const a=[];
+  if(s.control.foreign?.length)
+    a.push(`<div class="alert bad">${ICON.todo}<div><b>Another radar is running elsewhere.</b>
+      Two at once doubles the traffic to Whatnot and risks getting blocked. Stop the other one first.</div></div>`);
+  if(!s.config_exists)
+    a.push(`<div class="alert warn">${ICON.todo}<div>No settings file yet — saving anything below creates one.</div></div>`);
+  if(window._restartNeeded && run)
+    a.push(`<div class="alert warn">${ICON.todo}<div><b>Settings changed.</b>
+      Restart for them to take effect. <button class="sm ghost" style="margin-left:8px"
+      onclick="window._restartNeeded=false;post('/api/restart')">Restart now</button></div></div>`);
+  $('#alerts').innerHTML=a.join('');
 
-  const lg = await (await fetch('/api/log?lines=300')).json();
-  const atBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 40;
-  logEl.textContent = lg.lines.join('\n') || '(empty)';
-  if ($('#follow').checked && atBottom) logEl.scrollTop = logEl.scrollHeight;
+  try{ renderLog((await (await fetch('/api/log?lines=300')).json()).lines); }catch{}
 }
 
-async function loadConfig() {
-  const c = await (await fetch('/api/config')).json();
-  $('#notifier').value = c.notifier || 'bark';
-  $('#notifState').textContent = (c.notifier === 'ntfy')
-    ? (c.ntfy_topic_set ? 'ntfy topic is set' : 'no ntfy topic yet')
-    : (c.bark_key_set ? 'Bark key is set' : 'no Bark key yet');
-  $('#maxTabs').value = c.max_concurrent_streams ?? 3;
-  $('#sellerPoll').value = c.seller_poll_seconds ?? 90;
+async function loadConfig(){
+  const c=await (await fetch('/api/config')).json();
 
-  const bl = $('#blacklist'); bl.innerHTML = '';
-  (c.blacklist || []).forEach(name => {
-    const el = document.createElement('span');
-    el.className = 'tag';
-    el.innerHTML = `${name} <button title="unblock">×</button>`;
-    el.querySelector('button').onclick = () =>
-      post('/api/seller', {seller:name, list_name:'blacklist', remove:true}).then(loadConfig);
-    bl.appendChild(el);
-  });
-  if (!(c.blacklist||[]).length) bl.innerHTML = '<span class="muted">none</span>';
+  // notifications
+  const isBark=(c.notifier||'bark')==='bark';
+  $('#notifier').value=c.notifier||'bark';
+  $('#keyLabel').textContent=isBark?'Bark key':'ntfy topic';
+  const set=isBark?c.bark_key_set:c.ntfy_topic_set;
+  const hint=isBark?c.bark_key_hint:c.ntfy_topic_hint;
+  setCard('#cardNotif','#notifBadge',set);
+  $('#notifSaved').innerHTML = set
+    ? `${ICON.ok} Saved <b>${hint||''}</b>`
+    : `${ICON.todo} Nothing saved yet`;
 
-  const src = (c.discovery && c.discovery.sources || [])[0];
-  $('#sourceNow').textContent = src ? 'current: ' + src.name : 'no discovery source set';
+  // tuning
+  $('#maxTabs').value=c.max_concurrent_streams??3;
+  $('#sellerPoll').value=c.seller_poll_seconds??90;
 
-  const p = await (await fetch('/api/presets')).json();
-  const cat = $('#category'); cat.innerHTML = '';
-  Object.keys(p.categories).forEach(k => cat.add(new Option(k, k)));
-  const co = $('#countries'); co.innerHTML = '';
-  Object.entries(p.countries).forEach(([code, label]) => {
-    const o = new Option(label, code);
-    if (src && src.filters?.[0]?.values?.includes(code)) o.selected = true;
-    co.add(o);
-  });
+  // blocked
+  const bl=c.blacklist||[]; $('#blCount').textContent=bl.length;
+  $('#blacklist').innerHTML = bl.length ? bl.map(n=>
+    `<span class="tag">${n}<button aria-label="Unblock ${n}"
+      onclick="post('/api/seller',{seller:'${n}',list_name:'blacklist',remove:true})">×</button></span>`
+  ).join('') : '<p class="empty">No one blocked. Add a username to hide a seller completely.</p>';
+
+  // discovery
+  const src=(c.discovery?.sources||[])[0];
+  setCard('#cardDisc','#discBadge',!!src && c.discovery?.enabled);
+  $('#discSaved').innerHTML = src
+    ? `${ICON.ok} Watching <b>${src.name}</b>`
+    : `${ICON.todo} Nothing chosen yet`;
+
+  const p=await (await fetch('/api/presets')).json();
+  const cat=$('#category');
+  if(!cat.options.length){ Object.keys(p.categories).forEach(k=>cat.add(new Option(k,k))); }
+  const co=$('#countries');
+  if(!co.options.length){
+    Object.entries(p.countries).forEach(([code,label])=>{
+      const o=new Option(label,code);
+      if(src?.filters?.[0]?.values?.includes(code)) o.selected=true;
+      co.add(o);
+    });
+  }
+
+  // setup checklist — the "where am I?" for a first-time user
+  const steps=[['Phone alerts',set],['Whatnot login',null],['What to watch',!!src]];
+  const sess=await (await fetch('/api/status')).json();
+  steps[1][1]=sess.session.logged_in;
+  const done=steps.filter(s=>s[1]).length;
+  $('#setupBadge').textContent=`${done}/${steps.length}`;
+  $('#setupBadge').className='badge '+(done===steps.length?'ok':'todo');
+  setCard('#cardSetup','#setupBadge',done===steps.length);
+  $('#setupBadge').textContent=`${done}/${steps.length}`;
+  $('#setupList').innerHTML=steps.map(([n,ok])=>
+    `<div style="display:flex;gap:8px;align-items:center;color:${ok?'var(--ok)':'var(--muted)'}">
+      ${ok?ICON.ok:ICON.todo}<span style="color:${ok?'var(--ink)':'var(--muted)'}">${n}</span>
+      ${ok?'':'<span style="margin-left:auto;font-size:12px">still to do</span>'}</div>`).join('');
 }
 
-function addSeller(list) {
-  const v = $('#blockName').value.trim();
-  if (!v) return;
-  post('/api/seller', {seller:v, list_name:list}).then(() => {
-    $('#blockName').value = ''; loadConfig();
-  });
+async function loadSsh(){
+  try{
+    const s=await (await fetch('/api/ssh-info')).json();
+    $('#sshHint').textContent=s.remote_login_hint+'.';
+    $('#sshCmds').innerHTML=Object.entries(s.commands).map(([k,v])=>
+      `<div class="cmd"><code class="mono">${v}</code>
+       <button class="ghost sm" onclick="copyCmd(this,'${v.replace(/'/g,"\\'")}')"
+               aria-label="Copy ${k} command">${ICON.copy}</button></div>`).join('');
+  }catch{}
 }
-function saveNotifier() {
-  const n = $('#notifier').value, key = $('#notifKey').value.trim();
-  const patch = {notifier:n};
-  if (key) patch[n === 'bark' ? 'bark_key' : 'ntfy_topic'] = key;
-  post('/api/config', patch).then(() => { $('#notifKey').value=''; loadConfig(); });
+function copyCmd(btn,text){
+  navigator.clipboard?.writeText(text).then(()=>toast('Copied'),()=>toast('Copy failed',true));
 }
-function saveTuning() {
-  post('/api/config', {max_concurrent_streams:+$('#maxTabs').value,
-                       seller_poll_seconds:+$('#sellerPoll').value});
-}
-function saveSource() {
-  const countries = [...$('#countries').selectedOptions].map(o => o.value);
-  post('/api/discovery-source', {category:$('#category').value, countries})
-    .then(loadConfig);
-}
-async function loginStart() { await post('/api/login/start'); }
 
-$('#btnStart').onclick = () => post('/api/start');
-$('#btnStop').onclick  = () => post('/api/stop');
-$('#btnRestart').onclick = () => post('/api/restart');
+function addSeller(){
+  const v=$('#blockName').value.trim(); if(!v) return;
+  post('/api/seller',{seller:v,list_name:'blacklist'}).then(()=>$('#blockName').value='');
+}
+function saveNotifier(){
+  const n=$('#notifier').value, key=$('#notifKey').value.trim();
+  const patch={notifier:n};
+  if(key) patch[n==='bark'?'bark_key':'ntfy_topic']=key;
+  window._restartNeeded=true;
+  post('/api/config',patch).then(()=>$('#notifKey').value='');
+}
+function saveTuning(){
+  window._restartNeeded=true;
+  post('/api/config',{max_concurrent_streams:+$('#maxTabs').value,
+                      seller_poll_seconds:+$('#sellerPoll').value});
+}
+function saveSource(){
+  const countries=[...$('#countries').selectedOptions].map(o=>o.value);
+  if(!countries.length) return toast('Pick at least one country',true);
+  window._restartNeeded=true;
+  post('/api/discovery-source',{category:$('#category').value,countries});
+}
+$('#notifier').onchange=loadConfig;
+$('#btnStart').onclick=()=>post('/api/start');
+$('#btnStop').onclick=()=>post('/api/stop');
 
-refresh(); loadConfig();
-setInterval(refresh, 2500);
+refresh(); loadConfig(); loadSsh();
+setInterval(refresh,2500);
 </script>
 </body>
 </html>

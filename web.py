@@ -10,6 +10,7 @@ the open internet: it can start a browser and read your config.
 
 import argparse
 import json
+import platform
 import subprocess
 import sys
 import threading
@@ -126,17 +127,66 @@ def api_restart():
     return {"message": control.restart()}
 
 
+def _hint(secret: str) -> str:
+    """Enough to recognise a saved value, not enough to use it."""
+    secret = str(secret or "")
+    return f"••••{secret[-4:]}" if len(secret) >= 4 else ""
+
+
 @app.get("/api/config")
 def api_get_config():
     cfg = load_config()
-    # Never ship secrets to the browser; report only whether they're set.
+    # Never ship secrets to the browser; send only 'is it set' + a short hint
+    # so the UI can show what's saved without exposing the value.
     redacted = dict(cfg)
-    redacted["bark_key_set"] = bool(cfg.get("bark_key"))
-    redacted["ntfy_topic_set"] = bool(cfg.get("ntfy_topic")) and \
-        "CHANGE-ME" not in str(cfg.get("ntfy_topic", ""))
+    bark, topic = cfg.get("bark_key", ""), str(cfg.get("ntfy_topic", ""))
+    redacted["bark_key_set"] = bool(bark)
+    redacted["bark_key_hint"] = _hint(bark) if bark else ""
+    topic_set = bool(topic) and "CHANGE-ME" not in topic
+    redacted["ntfy_topic_set"] = topic_set
+    # no hint for the untouched placeholder — it would look like a saved value
+    redacted["ntfy_topic_hint"] = _hint(topic) if topic_set else ""
     redacted.pop("bark_key", None)
     redacted.pop("ntfy_topic", None)
     return redacted
+
+
+@app.get("/api/ssh-info")
+def api_ssh_info():
+    """Ready-made remote-control commands, so the panel can show exactly what
+    to put in a phone SSH shortcut instead of the user assembling it."""
+    import getpass
+    import shutil as _shutil
+    import socket
+
+    user = getpass.getuser()
+    hosts = []
+    short = socket.gethostname().split(".")[0]
+    if platform.system() == "Darwin":
+        hosts.append(f"{short}.local")
+    else:
+        hosts.append(short)
+    if (ts := _shutil.which("tailscale")):
+        try:  # Tailscale name works from anywhere on the tailnet
+            out = subprocess.run([ts, "status", "--json"], capture_output=True,
+                                 text=True, timeout=4)
+            name = json.loads(out.stdout)["Self"]["DNSName"].rstrip(".")
+            if name:
+                hosts.insert(0, name)
+        except Exception:
+            pass
+    ctl = f"{sys.executable} {PROJECT_DIR / 'control.py'}"
+    return {
+        "user": user, "hosts": hosts,
+        "commands": {action: f"ssh {user}@{hosts[0]} '{ctl} {action}'"
+                     for action in ("start", "stop", "status")},
+        "remote_login_hint": (
+            "Enable System Settings → General → Sharing → Remote Login"
+            if platform.system() == "Darwin" else
+            "Install the OpenSSH Server optional feature, then start the sshd service"
+            if platform.system() == "Windows" else
+            "Make sure an SSH server (openssh-server) is installed and running"),
+    }
 
 
 @app.post("/api/config")

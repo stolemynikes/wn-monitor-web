@@ -13,6 +13,7 @@ import argparse
 import json
 import random
 import re
+import shutil
 import sys
 import time
 import urllib.parse
@@ -28,8 +29,69 @@ CONFIG_PATH = PROJECT_DIR / "config.json"
 CONFIG_EXAMPLE_PATH = PROJECT_DIR / "config.example.json"
 STATE_PATH = PROJECT_DIR / "state.json"
 PROFILE_DIR = PROJECT_DIR / "whatnot-profile"
+PROFILE_BACKUP_DIR = PROJECT_DIR / "whatnot-profile-backup"
 DISCOVERY_QUERY_PATH = PROJECT_DIR / "discovery_getfeed.graphql"
 SEND_LOG_PATH = PROJECT_DIR / "notifications.log"
+
+
+def find_google_chrome() -> str | None:
+    """Return the real Chrome executable if present, else None."""
+    candidates = [
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+        "/usr/bin/google-chrome",
+        "/usr/bin/google-chrome-stable",
+        "/opt/google/chrome/google-chrome",
+        "C:/Program Files/Google/Chrome/Application/chrome.exe",
+        "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
+    ]
+    for path in candidates:
+        if Path(path).exists():
+            return str(path)
+    for command in ("google-chrome", "google-chrome-stable", "chrome"):
+        try:
+            import shutil as _shutil
+            resolved = _shutil.which(command)
+            if resolved:
+                return resolved
+        except Exception:
+            pass
+    return None
+
+
+def build_browser_launch_kwargs(user_data_dir: str | Path, *, headless: bool = False, extra_args=None):
+    """Use the real Chrome executable and persistent profile without unsupported sandbox flags."""
+    kwargs = {
+        "user_data_dir": str(user_data_dir),
+        "headless": headless,
+        "chromium_sandbox": True,
+    }
+    chrome_path = find_google_chrome()
+    if chrome_path:
+        kwargs["executable_path"] = chrome_path
+    if extra_args:
+        kwargs["args"] = list(extra_args)
+    return kwargs
+
+
+def backup_profile(source_dir: Path = PROFILE_DIR, backup_dir: Path = PROFILE_BACKUP_DIR) -> bool:
+    """Copy the current profile to a last-known-good backup."""
+    if not source_dir.exists():
+        return False
+    if backup_dir.exists():
+        shutil.rmtree(backup_dir, ignore_errors=True)
+    shutil.copytree(source_dir, backup_dir)
+    return True
+
+
+def restore_profile(source_dir: Path = PROFILE_DIR, backup_dir: Path = PROFILE_BACKUP_DIR) -> bool:
+    """Restore the last-known-good profile after a Cloudflare challenge."""
+    if not backup_dir.exists():
+        return False
+    if source_dir.exists():
+        shutil.rmtree(source_dir, ignore_errors=True)
+    shutil.copytree(backup_dir, source_dir)
+    return True
 
 
 def audit_send(backend: str, priority: str, title: str, outcome: str) -> None:
@@ -588,15 +650,17 @@ def cmd_test(config: dict) -> None:
 def cmd_login(config: dict) -> None:
     from playwright.sync_api import sync_playwright
 
+    if PROFILE_DIR.exists():
+        backup_profile()
     with sync_playwright() as p:
         ctx = p.chromium.launch_persistent_context(
-            user_data_dir=str(PROFILE_DIR),
-            headless=False,
+            **build_browser_launch_kwargs(PROFILE_DIR, headless=False)
         )
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         page.goto("https://www.whatnot.com/login")
         print("A browser window is open. Log in to Whatnot there.")
         input("When you're logged in, press Enter here to save the session and close... ")
+        backup_profile()
         try:
             ctx.close()
         except Exception:
@@ -838,10 +902,14 @@ def cmd_run(config: dict) -> None:
            f" +{pinned_extra_tabs}/live pinned seller"
            if watch_giveaways else "; giveaway watching OFF"))
     with sync_playwright() as p:
+        if PROFILE_DIR.exists():
+            backup_profile()
         ctx = p.chromium.launch_persistent_context(
-            user_data_dir=str(PROFILE_DIR),
-            headless=config.get("headless", False),
-            args=["--mute-audio"],
+            **build_browser_launch_kwargs(
+                PROFILE_DIR,
+                headless=config.get("headless", False),
+                extra_args=["--mute-audio"],
+            )
         )
         poll_page = ctx.pages[0] if ctx.pages else ctx.new_page()
         watchers = {}          # stream_id -> StreamWatcher
@@ -879,11 +947,13 @@ def cmd_run(config: dict) -> None:
         def check_session(page) -> bool:
             """True if the monitor must stop (bot challenge / logged out)."""
             if is_bot_challenge(page):
-                log("Bot challenge encountered — stopping. Run headful and slower.")
+                log("Cloudflare challenge detected — restoring the last known-good profile and stopping.")
+                restore_profile()
+                print("Cloudflare challenge detected. The last known-good profile was restored. Run `python monitor.py login` again before restarting.", flush=True)
                 try:
                     notifier.send(
-                        "⚠️ Radar stopped: bot challenge ⚠️",
-                        "Cloudflare challenge hit — needs manual attention.",
+                        "⚠️ Radar stopped: Cloudflare challenge ⚠️",
+                        "Cloudflare challenge detected. The last known-good profile was restored. Run monitor.py login again to refresh the session.",
                         BASE_URL, priority="high",
                     )
                 except Exception:
