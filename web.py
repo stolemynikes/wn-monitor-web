@@ -355,8 +355,12 @@ def api_phone_info(request: Request):
 
 @app.get("/api/phone-qr.svg")
 def api_phone_qr(request: Request):
-    import qrcode
-    import qrcode.image.svg
+    try:
+        import qrcode
+        import qrcode.image.svg
+    except ModuleNotFoundError:
+        # Missing optional dep shouldn't 500 the panel — the URL is shown too.
+        raise HTTPException(503, "QR support not installed (pip install qrcode)")
     host = _tailnet_host()
     if not host:
         raise HTTPException(404, "Tailscale not running")

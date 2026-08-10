@@ -3,3 +3,4 @@ requests>=2.31
 psutil>=5.9
 fastapi>=0.110
 uvicorn>=0.29
+qrcode>=7.4
