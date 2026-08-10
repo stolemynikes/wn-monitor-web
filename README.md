@@ -35,91 +35,32 @@ everything else happens in a normal window with buttons.
 
 ## Part 1 — Install it (once)
 
-### Step 1: Open the black text window
+1. **Get the files.** On the GitHub page click the green **Code** button →
+   **Download ZIP**, then unzip it. (Or `git clone` if you know what that is.)
 
-This is the only "techy" bit. It's a program where you type commands.
+2. **Check you have Python.** The tool needs Python 3.11 or newer. If you're not
+   sure, skip ahead — the next step will tell you if it's missing and where to
+   get it.
 
-- **Mac**: press `Cmd + Space`, type `Terminal`, press Enter.
-- **Windows**: press the Start button, type `PowerShell`, press Enter.
+3. **Double-click the launcher** in the unzipped folder:
 
-A window with text appears. You'll paste lines into it and press Enter after
-each one. If it asks for your password while installing, that's normal — type it
-(you won't see the characters) and press Enter.
+   - **Mac** → `start-panel.command`
+   - **Windows** → `start-panel.bat`
 
-### Step 2: Check you have Python
+That's it. The first run installs everything it needs — a few minutes, once —
+then your browser opens at **http://127.0.0.1:8765** showing the panel. Every
+time after that, the same double-click just opens the panel in a couple of
+seconds.
 
-Python is the language this tool is written in. Paste this and press Enter:
+**On a Mac**, the first double-click may be refused because the file came from
+the internet. Right-click it → **Open** → **Open**. You only do this once.
 
-```bash
-python3 --version
-```
+**If it says Python is missing**, install it from
+[python.org/downloads](https://www.python.org/downloads/) — on Windows tick
+*"Add Python to PATH"* — then double-click the launcher again.
 
-- If you see something like `Python 3.11.5` or higher → great, continue.
-- If you see an error, or a number below 3.11 → install it from
-  [python.org/downloads](https://www.python.org/downloads/), then close and
-  reopen the text window and try again.
-
-*(On Windows, use `python` instead of `python3` in every command below.)*
-
-### Step 3: Download the tool
-
-```bash
-git clone https://github.com/stolemynikes/wn-monitor-web
-cd wn-monitor-web
-```
-
-If it says `git: command not found`, download the ZIP from the GitHub page
-instead (green **Code** button → **Download ZIP**), unzip it, and then in the
-text window type `cd ` followed by dragging the unzipped folder onto the window
-and pressing Enter.
-
-### Step 4: Set it up
-
-Paste these **one at a time**, waiting for each to finish. The third one
-downloads the mini browser and takes a few minutes — that's normal.
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-playwright install chromium
-cp config.example.json config.json
-```
-
-On **Windows**, two lines are different:
-
-```powershell
-.venv\Scripts\activate
-copy config.example.json config.json
-```
-
-### Step 5: Open the control panel
-
-```bash
-.venv/bin/python web.py
-```
-
-Your web browser should open by itself at **http://127.0.0.1:8765**, showing a
-dark page called **Whatnot Radar**. If it doesn't open, type that address into
-your browser yourself.
-
-Leave the text window open — closing it turns the panel off.
-
-> **Why `.venv/bin/python` and not just `python`?** The setup in Step 4 put all
-> the parts into a folder called `.venv`. Plain `python` doesn't know about
-> them, and you'd get an error like `No module named 'fastapi'`. Using the full
-> path always works. (On Windows: `.venv\Scripts\python web.py`.)
-
-**From now on you don't need to type anything.** To open the panel again later,
-just double-click:
-
-- **Mac** → `start-panel.command`
-- **Windows** → `start-panel.bat`
-
-The first time on a Mac, macOS may say it can't verify the file. Right-click it
-→ **Open** → **Open** once, and it'll work normally after that.
-
----
+Leave the black window open while you use the panel; closing it shuts the panel
+down.
 
 ## Part 2 — Set it up in the panel (once)
 
