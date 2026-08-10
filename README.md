@@ -306,6 +306,13 @@ only from your own devices, which is what you actually want.
 
 ---
 
+## Running it on a server
+
+Don't want to leave your computer on? See **[docs/server.md](docs/server.md)**
+for Linux/VPS setup — but read the first section: a VPS is the *worst* of the
+options because datacenter IP addresses are treated as suspicious by Whatnot's
+bot protection. An old laptop or a Raspberry Pi at home works much better.
+
 ## For technical users
 
 - `python control.py start|stop|restart|status` — run it without the panel.

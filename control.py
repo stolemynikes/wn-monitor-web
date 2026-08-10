@@ -9,6 +9,7 @@ has one cross-platform way to manage the monitor process. Usable directly:
 
 import json
 import os
+import shutil
 import platform
 import signal
 import subprocess
@@ -24,6 +25,7 @@ PID_FILE = PROJECT_DIR / ".radar.pid"
 LOG_FILE = PROJECT_DIR / "radar.log"
 IS_WINDOWS = platform.system() == "Windows"
 IS_MAC = platform.system() == "Darwin"
+IS_LINUX = platform.system() == "Linux"
 
 STOP_GRACE_SECONDS = 15  # monitor closes tabs and flushes state on shutdown
 
@@ -98,6 +100,15 @@ def start(force: bool = False) -> str:
         # Keep macOS from idle-sleeping or App-Napping the browser, which
         # silently freezes detection.
         cmd = ["caffeinate", "-dis"] + cmd
+    elif IS_LINUX and not os.environ.get("DISPLAY"):
+        # A server has no screen, but true headless Chromium is refused by
+        # Cloudflare — so run the real browser against a virtual display.
+        if not shutil.which("xvfb-run"):
+            return ("no display and xvfb-run not found — install it "
+                    "(Debian/Ubuntu: sudo apt install xvfb) or run with a "
+                    "desktop session. Headless mode is not an option: "
+                    "Whatnot's bot protection blocks it.")
+        cmd = ["xvfb-run", "-a", "--server-args=-screen 0 1280x1024x24"] + cmd
 
     kwargs = {}
     if IS_WINDOWS:
