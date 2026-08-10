@@ -188,6 +188,15 @@
          box-shadow:0 12px 40px rgba(0,0,0,.6); max-width:calc(100vw - 32px)}
   #toast.show{opacity:1; transform:translate(-50%,0)}
   #toast.bad{border-color:rgba(255,95,87,.5)}
+  /* Compact buttons are fine with a mouse but under the 44px touch guideline.
+     Grow them wherever the pointer is imprecise or the screen is small. */
+  @media (pointer:coarse),(max-width:780px){
+    button{min-height:44px}
+    button.sm{min-height:44px; padding:0 15px; font-size:13px}
+    .chip{min-height:44px}
+    .tag button{min-height:32px; width:32px}
+    #follow{width:20px; height:20px}
+  }
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
