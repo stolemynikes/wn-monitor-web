@@ -266,15 +266,32 @@ Everything stays on your computer. Your Whatnot login, your settings and your
 logs never get sent anywhere. The only things it talks to are Whatnot itself and
 your own notification app.
 
-The panel is only reachable from your own machine. If you want to use it from
-your phone, put both devices on a private network like
-[Tailscale](https://tailscale.com) and start it with `.venv/bin/python web.py --host
-0.0.0.0`. **Never put it on the open internet** — it can open a browser and read
-your settings.
+The panel is only reachable from your own machine unless you deliberately open
+it up — see below.
 
 If you ever share this folder, don't include `config.json` or the
 `whatnot-profile` folder: they contain your login and your notification key.
 (They're already excluded from git for exactly this reason.)
+
+## Using the panel on your phone
+
+Open the panel on your computer and look at the **"use on your phone"** card —
+it walks you through it and shows a QR code you can point your camera at, so you
+never have to type an address. It knows your computer's name, so the
+instructions there are already filled in for you.
+
+The short version: install [Tailscale](https://tailscale.com) on the computer and
+the phone, sign in to both with the same account, then restart the panel with:
+
+```bash
+.venv/bin/python web.py --host 0.0.0.0
+```
+
+Scan the QR code, and your phone asks once for the password shown on that card.
+
+**Don't put the panel on the open internet.** Anyone who found it could start
+your radar, read your log and change your settings. Tailscale keeps it reachable
+only from your own devices, which is what you actually want.
 
 ---
 
