@@ -46,7 +46,7 @@ def read_pid():
         # Guard against PID reuse: it must actually be our monitor.
         if "monitor.py" in " ".join(proc.cmdline()):
             return pid
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
+    except Exception:      # incl. bare PermissionError from the OS
         pass
     PID_FILE.unlink(missing_ok=True)
     return None
@@ -60,9 +60,13 @@ def foreign_instances():
     """
     found = []
     for proc in psutil.process_iter(["pid", "cmdline"]):
+        # Broad catch on purpose: reading another user's process can raise a
+        # plain PermissionError from the OS (macOS KERN_PROCARGS2), not just
+        # psutil's own exceptions — and one unreadable process must never take
+        # down /api/status.
         try:
             argv = proc.info["cmdline"] or []
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
+        except Exception:
             continue
         # Identify by the SCRIPT path, not the whole command line: our venv's
         # interpreter lives under PROJECT_DIR, so a substring test on the full
