@@ -378,6 +378,14 @@ def api_regen_password(request: Request):
     return {"message": f"new password: {ensure_password()}"}
 
 
+@app.post("/api/reset-profile")
+def api_reset_profile():
+    require_stopped()
+    freed = profile_tools.reset_profile()
+    return {"message": f"profile reset ({freed / 1e6:.0f} MB removed) — "
+                       "click Log in to sign in again"}
+
+
 @app.get("/api/presets")
 def api_presets():
     return {"countries": COUNTRIES, "categories": CATEGORY_PRESETS}

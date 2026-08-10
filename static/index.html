@@ -254,6 +254,9 @@
         <button class="sm danger" onclick="confirmPost('/api/clear-site-data',
           'This LOGS YOU OUT of Whatnot. You will have to log in again. Continue?')">
           log out</button>
+        <button class="sm danger" onclick="confirmPost('/api/reset-profile',
+          'Delete the browser profile completely and start over?\n\nUse this if Whatnot keeps showing an endless \'checking your browser\' page — that is caused by the profile, and a fresh one fixes it.\n\nYou will have to log in again.')">
+          fresh profile</button>
       </div>
     </section>
   </div>

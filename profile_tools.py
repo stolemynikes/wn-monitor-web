@@ -67,6 +67,22 @@ def clear_site_data() -> int:
     return _delete(SITE_DATA_PATHS)
 
 
+def reset_profile() -> int:
+    """Throw the profile away and start empty. Returns bytes freed.
+
+    Measured 2026-08-10: when Cloudflare starts serving the endless "just a
+    moment" challenge, it's the profile's site data that's flagged — the same
+    browser on the same connection loads fine once cookies/storage are gone.
+    So the only reset that resets anything is an empty profile plus a fresh
+    login. Never reseed from a backup: every backup is a copy of the profile
+    that got flagged, so restoring one restores the flag.
+    """
+    freed = _size(PROFILE_DIR)
+    shutil.rmtree(PROFILE_DIR, ignore_errors=True)
+    PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    return freed
+
+
 def session_state() -> dict:
     """Whether a Whatnot session looks present, read straight from the cookie
     DB — far cheaper than launching a browser to find out."""

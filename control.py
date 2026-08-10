@@ -4,7 +4,7 @@
 Replaces the macOS-only shell script (bash + tmux + caffeinate) so the web panel
 has one cross-platform way to manage the monitor process. Usable directly:
 
-    python control.py start | stop | restart | status
+    python control.py start | stop | restart | status | reset-profile
 """
 
 import json
@@ -189,6 +189,13 @@ def main() -> None:
             print("  ", line)
         for pid, cmd in st["foreign"]:
             print(f"  ! other radar running: pid {pid} — {cmd[:80]}")
+    elif action == "reset-profile":
+        if read_pid() is not None:
+            print("stop the radar first"); sys.exit(1)
+        import profile_tools
+        freed = profile_tools.reset_profile()
+        print(f"profile reset ({freed/1e6:.0f} MB removed) — log in again "
+              "before starting")
     elif action == "--json":
         print(json.dumps(status(), indent=2))
     else:
