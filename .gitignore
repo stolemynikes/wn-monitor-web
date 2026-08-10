@@ -9,3 +9,4 @@ notifications.log
 radar.log
 .login_done
 .login_running
+.tmp_launch_check/
