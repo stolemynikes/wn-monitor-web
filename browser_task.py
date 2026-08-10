@@ -61,34 +61,80 @@ def backup_profile(source_dir: Path = PROFILE_DIR, backup_dir: Path = PROFILE_BA
     return True
 
 
+def whatnot_cookie_count() -> int:
+    """How many whatnot.com cookies the profile holds — used to tell whether a
+    login actually took, without launching anything."""
+    import sqlite3
+    import tempfile
+    src = PROFILE_DIR / "Default" / "Cookies"
+    if not src.exists():
+        return 0
+    tmp = Path(tempfile.mkdtemp()) / "c"
+    try:
+        shutil.copy(src, tmp)
+        with sqlite3.connect(tmp) as con:
+            return con.execute("SELECT COUNT(*) FROM cookies "
+                               "WHERE host_key LIKE '%whatnot%'").fetchone()[0]
+    except Exception:
+        return 0
+    finally:
+        shutil.rmtree(tmp.parent, ignore_errors=True)
+
+
 def login() -> None:
-    from playwright.sync_api import sync_playwright
+    """Open a plain, human-driven Chrome on the tool's profile so you can sign
+    in yourself.
+
+    Deliberately NOT Playwright. Whatnot's protection tolerates automated
+    anonymous browsing but challenges an automated browser at the login step,
+    so driving this with Playwright — even using Chrome's own binary — walks
+    into the "just a moment" loop. Launching Chrome as an ordinary process
+    means a real person really is doing the login; the radar then reuses the
+    session that produced.
+    """
+    import subprocess
 
     DONE_FILE.unlink(missing_ok=True)
-    print("Opening browser. Log in to Whatnot, then click 'I'm done' in the panel.",
-          flush=True)
-    if PROFILE_DIR.exists():
-        backup_profile()
-    with sync_playwright() as p:
-        ctx = p.chromium.launch_persistent_context(
-            **build_browser_launch_kwargs(PROFILE_DIR, headless=False)
-        )
-        page = ctx.pages[0] if ctx.pages else ctx.new_page()
-        try:
-            page.goto("https://www.whatnot.com/login", wait_until="domcontentloaded")
-        except Exception as exc:
-            print(f"could not load the login page: {exc}", flush=True)
-        deadline = time.time() + LOGIN_TIMEOUT_SECONDS
-        while time.time() < deadline and not DONE_FILE.exists():
-            if not ctx.pages:  # user closed the window themselves
-                break
-            time.sleep(1)
-        DONE_FILE.unlink(missing_ok=True)
-        try:
-            ctx.close()
-        except Exception:
-            pass
-    print("Browser closed; session saved to the profile.", flush=True)
+    PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    before = whatnot_cookie_count()
+
+    chrome = find_google_chrome()
+    if not chrome:
+        print("Google Chrome not found — install it, or log in with "
+              "`python monitor.py login` instead.", flush=True)
+        return
+
+    print("Opening Chrome. Log in to Whatnot, then click \"I'm done\" in the "
+          "panel (or just close the window).", flush=True)
+    proc = subprocess.Popen(
+        [chrome, f"--user-data-dir={PROFILE_DIR}",
+         "--no-first-run", "--no-default-browser-check",
+         "https://www.whatnot.com/login"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    deadline = time.time() + LOGIN_TIMEOUT_SECONDS
+    while time.time() < deadline:
+        if proc.poll() is not None:      # user closed Chrome themselves
+            break
+        if DONE_FILE.exists():           # user pressed the panel button
+            proc.terminate()             # graceful, so Chrome flushes cookies
+            try:
+                proc.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            break
+        time.sleep(1)
+    DONE_FILE.unlink(missing_ok=True)
+
+    time.sleep(1)  # let the cookie DB settle after shutdown
+    after = whatnot_cookie_count()
+    if after > 0:
+        print(f"Session saved — {after} whatnot cookies in the profile "
+              f"(was {before}).", flush=True)
+    else:
+        print("No Whatnot cookies found — the login didn't complete. "
+              "Try again and make sure you're signed in before closing.",
+              flush=True)
 
 
 if __name__ == "__main__":
