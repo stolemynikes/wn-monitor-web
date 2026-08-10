@@ -331,6 +331,13 @@
     <p class="hint" style="margin-top:0">Prefer the phone panel above. These are for
       an iOS Shortcut button or any SSH app — Android→Mac and iPhone→Windows both
       work. <span id="sshHint"></span></p>
+    <div class="chips" role="group" aria-label="Which format to show"
+         style="margin:14px 0 4px">
+      <button type="button" class="chip" id="tabShortcut" aria-pressed="true"
+              onclick="setSshMode('shortcut')">Apple Shortcuts</button>
+      <button type="button" class="chip" id="tabTerminal" aria-pressed="false"
+              onclick="setSshMode('terminal')">Terminal</button>
+    </div>
     <div id="sshCmds"></div>
   </section>
 </main>
@@ -573,28 +580,64 @@ function phoneAccessBlock(p){
         {allow:true})">allow my phone</button></div></div></div>`;
 }
 
+// Three near-identical 80-character commands are indistinguishable at a
+// glance — the label says which one you are about to copy.
+const SSH_WHAT={start:'begin watching', stop:'stop watching',
+                status:'is it running?'};
+let sshInfo=null, sshMode='shortcut';
+
+function field(label, value, note){
+  return `<div style="margin-top:10px">
+    <div style="display:flex; gap:8px; align-items:baseline">
+      <b style="font-size:12px; letter-spacing:.06em; text-transform:uppercase">${esc(label)}</b>
+      ${note?`<span class="hint" style="margin:0">${esc(note)}</span>`:''}
+    </div>
+    <div class="cmd"><code>${esc(value)}</code>
+      <button class="sm" aria-label="Copy ${esc(label)}"
+        onclick='copyCmd(${JSON.stringify(value)})'>${ICON.copy}</button></div>
+  </div>`;
+}
+
+function renderSsh(){
+  const s=sshInfo; if(!s) return;
+  $('#tabShortcut').setAttribute('aria-pressed',String(sshMode==='shortcut'));
+  $('#tabTerminal').setAttribute('aria-pressed',String(sshMode==='terminal'));
+  if(sshMode==='terminal'){
+    $('#sshCmds').innerHTML=Object.entries(s.commands)
+      .map(([k,v])=>field(k,v,SSH_WHAT[k])).join('');
+    return;
+  }
+  // Shortcuts' "Run Script Over SSH" has its own Host/Port/User/Script boxes
+  // and runs Script AS the remote command — the full `ssh user@host '...'`
+  // line belongs in a terminal, not in that field.
+  $('#sshCmds').innerHTML=`
+    <p class="hint" style="margin-top:0">In the Shortcuts app: <b>+</b> → add the
+      <b>Run Script Over SSH</b> action → fill these in. Make one shortcut per
+      button, then long-press it → <b>Add to Home Screen</b>.</p>
+    ${field('host',String(s.host))}
+    ${field('port',String(s.port))}
+    ${field('user',String(s.user))}
+    <p class="hint" style="margin-top:12px">Set <b>Authentication</b> to your
+      password for this computer, or to an SSH key if you have one.</p>
+    <p class="hint" style="margin-top:14px; letter-spacing:.08em;
+       text-transform:uppercase; font-size:11px">script — one shortcut each</p>
+    ${Object.entries(s.scripts).map(([k,v])=>field(k,v,SSH_WHAT[k])).join('')}
+    <p class="hint" style="margin-top:12px">Paste the script exactly as shown —
+      no <code>ssh</code> in front and no quotes around it. Shortcuts adds the
+      connection itself.</p>`;
+}
+
+function setSshMode(mode){ sshMode=mode; renderSsh(); }
+
 async function loadSsh(){
   try{
-    const s=await(await fetch('/api/ssh-info')).json();
-    $('#sshHint').innerHTML=esc(s.remote_login_hint)+'. These use <b>'+esc(s.host)
-      +'</b> ('+esc(s.via)+')'
-      +(s.via==='tailscale'?', which works from anywhere.'
+    sshInfo=await(await fetch('/api/ssh-info')).json();
+    $('#sshHint').innerHTML=esc(sshInfo.remote_login_hint)+'. These use <b>'
+      +esc(sshInfo.host)+'</b> ('+esc(sshInfo.via)+')'
+      +(sshInfo.via==='tailscale'?', which works from anywhere.'
         :' — that name only resolves on your own network. Connect Tailscale to '
         +'reach it from outside.');
-    // Three near-identical 80-character commands are indistinguishable at a
-    // glance — the label says which one you are about to copy.
-    const WHAT={start:'begin watching', stop:'stop watching',
-                status:'is it running?'};
-    $('#sshCmds').innerHTML=Object.entries(s.commands).map(([k,v])=>
-      `<div style="margin-top:12px">
-         <div style="display:flex; gap:8px; align-items:baseline">
-           <b style="font-size:12px; letter-spacing:.06em; text-transform:uppercase">${esc(k)}</b>
-           <span class="hint" style="margin:0">${esc(WHAT[k]||'')}</span>
-         </div>
-         <div class="cmd"><code>${esc(v)}</code>
-          <button class="sm" aria-label="Copy the ${esc(k)} command"
-            onclick='copyCmd(${JSON.stringify(v)})'>${ICON.copy}</button></div>
-       </div>`).join('');
+    renderSsh();
   }catch{}
 }
 const copyCmd=t=>navigator.clipboard?.writeText(t).then(()=>toast('copied'),()=>toast('copy failed',true));

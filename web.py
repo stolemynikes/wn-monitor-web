@@ -254,8 +254,16 @@ def api_get_config():
 @app.get("/api/ssh-info")
 def api_ssh_info():
     """Ready-made remote-control commands, so the panel can show exactly what
-    to put in a phone SSH shortcut instead of the user assembling it."""
+    to put in a phone SSH shortcut instead of the user assembling it.
+
+    Two shapes, because they are not interchangeable. A terminal wants one
+    `ssh user@host '<command>'` line. Apple's "Run Script Over SSH" action has
+    separate Host / Port / User / Script fields and runs the Script *as* the
+    remote command — paste the full ssh line in there and it tries to run ssh
+    on the far end. So the bare remote command is published separately.
+    """
     import getpass
+    import shlex
     import socket
 
     user = getpass.getuser()
@@ -269,15 +277,40 @@ def api_ssh_info():
     # so prefer it when there is one.
     if (name := _tailnet_host()):
         hosts.insert(0, name)
-    ctl = f"{sys.executable} {PROJECT_DIR / 'control.py'}"
+
+    actions = ("start", "stop", "status")
+    parts = [sys.executable, str(PROJECT_DIR / "control.py")]
+    if platform.system() == "Windows":
+        # Windows sshd hands the command to cmd.exe, which understands double
+        # quotes and not POSIX single quotes — and these paths contain spaces
+        # often enough (Program Files, "My Documents") to matter.
+        quoted = " ".join(f'"{p}"' for p in parts)
+    else:
+        quoted = " ".join(shlex.quote(p) for p in parts)
+    scripts = {action: f"{quoted} {action}" for action in actions}
+
+    def outer(script: str) -> str:
+        """Quote the remote command for the LOCAL shell, readably.
+
+        shlex.quote is always correct but renders a path containing a space as
+        ''"'"'/My Stuff/python'"'"' …' — correct, and nobody will trust it
+        enough to paste it. Prefer plain quotes when they are unambiguous.
+        """
+        if "'" not in script:
+            return f"'{script}'"
+        if not any(c in script for c in '"$`\\'):
+            return f'"{script}"'
+        return shlex.quote(script)
+
     return {
-        "user": user, "hosts": hosts, "host": hosts[0],
+        "user": user, "hosts": hosts, "host": hosts[0], "port": 22,
         # SSH does not need the QR code — that is only a shortcut for opening
         # the panel in a phone browser. Say which address these use, because a
         # local name silently fails the moment you leave the house.
         "via": "tailscale" if name else "local network",
-        "commands": {action: f"ssh {user}@{hosts[0]} '{ctl} {action}'"
-                     for action in ("start", "stop", "status")},
+        "scripts": scripts,
+        "commands": {action: f"ssh {user}@{hosts[0]} {outer(script)}"
+                     for action, script in scripts.items()},
         "remote_login_hint": (
             "Enable System Settings → General → Sharing → Remote Login"
             if platform.system() == "Darwin" else
