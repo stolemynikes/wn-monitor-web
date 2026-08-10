@@ -3,9 +3,10 @@
 
     python web.py            # then open http://127.0.0.1:8765
 
-Binds to loopback only. To reach it from your phone, put the machine on a
-private network (e.g. Tailscale) and use --host 0.0.0.0 — never expose it to
-the open internet: it can start a browser and read your config.
+Binds whatever config.panel_host says, loopback by default. To reach it from
+your phone, put the machine on a private network (e.g. Tailscale) and use the
+panel's "allow my phone" button, or --host 0.0.0.0 for a single run. Never
+expose it to the open internet: it can start a browser and read your config.
 """
 
 import argparse
@@ -54,7 +55,7 @@ EDITABLE = {
     "seller_poll_seconds", "giveaway_poll_seconds", "max_concurrent_streams",
     "pinned_extra_tabs", "watch_giveaways", "headless", "sellers",
     "blacklist", "blacklist_temp", "bought_sellers", "foreign_sellers",
-    "discovery", "panel_password",
+    "discovery", "panel_password", "panel_host",
 }
 
 # Phase 5: presets. Only the Pokémon feedId is one we have actually captured
@@ -435,15 +436,43 @@ def api_phone_info(request: Request):
     tailnet = tailnet_state()
     host = tailnet["host"]
     port = request.url.port or 8765
+    bound_all = SERVE_HOST != "127.0.0.1"
+    wants_all = str(load_config().get("panel_host") or "127.0.0.1") != "127.0.0.1"
     return {
         "tailscale": bool(host),
         "tailscale_state": tailnet["state"],
         "url": f"http://{host}:{port}" if host else None,
         # only echo the password to someone already sitting at the machine
         "password": ensure_password() if local else None,
-        "bound_all": SERVE_HOST != "127.0.0.1",
+        "bound_all": bound_all,
+        # saved but not in effect yet: the panel has to be started again
+        "restart_pending": wants_all and not bound_all,
+        "launcher": "start-panel.bat" if platform.system() == "Windows"
+                    else "start-panel.command",
+        "manual_command": f'"{sys.executable}" web.py --host 0.0.0.0',
+        "project_dir": str(PROJECT_DIR),
         "port": port,
     }
+
+
+class PhoneAccessReq(BaseModel):
+    allow: bool
+
+
+@app.post("/api/phone-access")
+def api_phone_access(req: PhoneAccessReq):
+    """Save whether the panel should accept connections from other devices.
+
+    A saved setting rather than a command-line flag because the launcher is how
+    this actually gets started, and it passes no arguments.
+    """
+    cfg = load_config()
+    cfg["panel_host"] = "0.0.0.0" if req.allow else "127.0.0.1"
+    save_config(cfg)
+    if not req.allow:
+        return {"message": "phone access off — restart the panel to apply"}
+    return {"message": "phone access saved — close the panel window and start "
+                       "it again to apply"}
 
 
 @app.get("/api/phone-qr.svg")
@@ -521,13 +550,19 @@ def http_error(_request, exc: HTTPException):
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--host", default=None,
+                    help="override the saved panel_host for this run")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-browser", action="store_true",
                     help="don't open the panel automatically")
     args = ap.parse_args()
+    # Nobody types a command to start this — they double-click the launcher,
+    # which passes no arguments. So the phone-access choice has to live in the
+    # config where the launcher will pick it up, not in a flag.
+    host = args.host or str(load_config().get("panel_host") or "127.0.0.1")
     global SERVE_HOST
-    SERVE_HOST = args.host
+    SERVE_HOST = host
+    args.host = host
     if args.host not in ("127.0.0.1", "localhost"):
         print(f"\n  Reachable on your network ({args.host}).", flush=True)
         print(f"  Password for remote access: {ensure_password()}", flush=True)

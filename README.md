@@ -223,14 +223,18 @@ it walks you through it and shows a QR code you can point your camera at, so you
 never have to type an address. It knows your computer's name, so the
 instructions there are already filled in for you.
 
-The short version: install [Tailscale](https://tailscale.com) on the computer and
-the phone, sign in to both with the same account, then restart the panel with:
+The short version:
 
-```bash
-.venv/bin/python web.py --host 0.0.0.0
-```
+1. Install [Tailscale](https://tailscale.com) on the computer and the phone, and
+   sign in to both with the **same account**.
+2. In the panel's "use on your phone" card, click **allow my phone**.
+3. Close the black window and double-click the launcher again. (That's the only
+   way the change takes effect — the panel reads the setting when it starts.)
+4. Scan the QR code. Your phone asks once for the password shown on that card,
+   and remembers it.
 
-Scan the QR code, and your phone asks once for the password shown on that card.
+Step 3 matters: until you restart it, the panel only answers to the computer
+it's running on, so your phone will scan the code and get nothing.
 
 **Don't put the panel on the open internet.** Anyone who found it could start
 your radar, read your log and change your settings. Tailscale keeps it reachable
@@ -262,7 +266,9 @@ bot protection. An old laptop or a Raspberry Pi at home works much better.
 - `python monitor.py run` — foreground, logs to stdout.
 - `python monitor.py test` — send a test notification.
 - Config lives in `config.json`; the panel only writes an allowlist of fields.
-- The panel binds `127.0.0.1:8765`; `--host` to change, with the warning above.
+- The panel binds `config.panel_host` (default `127.0.0.1`) on port 8765. The
+  **allow my phone** button writes that field; `--host` overrides it for one
+  run. Either way, read the warning above.
 - Discovery uses Whatnot's own `GetFeed` GraphQL call. Only the Pokémon feed id
   is bundled. To add a category: open its browse page with devtools, apply the
   *Shipped from* filter, find the `GetFeed` request, and copy

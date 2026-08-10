@@ -18,6 +18,8 @@
   "watch_giveaways": true,
   "headless": false,
 
+  "panel_host": "127.0.0.1",
+
   "discovery": {
     "enabled": true,
     "poll_seconds": 300,

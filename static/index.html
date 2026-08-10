@@ -352,10 +352,10 @@ async function post(url,body){
   try{const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify(body||{})});
     const j=await r.json(); toast(j.error||j.message||'done',!r.ok);
-    refresh(); loadConfig(); return j;
+    refresh(); loadConfig(); loadPhone(); return j;
   }catch(e){toast(String(e),true)}
 }
-const confirmPost=(u,q)=>{if(confirm(q))post(u)};
+const confirmPost=(u,q,body)=>{if(confirm(q))post(u,body)};
 const fmt=b=>b>1e9?(b/1e9).toFixed(2)+' GB':b>1e6?(b/1e6).toFixed(0)+' MB':(b/1e3).toFixed(0)+' KB';
 function setCard(card,badge,ready){
   $(card).classList.toggle('ready',ready); $(card).classList.toggle('todo',!ready);
@@ -536,12 +536,41 @@ async function loadPhone(){
               new password</button></div>`:''}
       </div>
     </div>
-    ${p.bound_all?'':`<p class="hint" style="margin-top:14px">⚠ Right now the panel
-      only accepts connections from this computer. Restart it with
-      <code style="padding:2px 6px">--host 0.0.0.0</code> to let your phone in.</p>`}
+    ${phoneAccessBlock(p)}
     <p class="hint">Your phone will ask for the password once and remember it.
       Only your own Tailscale devices can reach this — it is not on the public
       internet, and it shouldn't be.</p>`;
+}
+
+// The old copy just said "restart it with --host 0.0.0.0", which nobody can
+// act on: the panel is started by double-clicking the launcher, and the
+// launcher passes no arguments. So it's a saved setting with the exact
+// double-click to perform, and the command line kept only as a footnote.
+function phoneAccessBlock(p){
+  if(p.bound_all) return `<p class="hint" style="margin-top:14px">${ICON.ok}
+    Phone access is on — this panel accepts connections from your other devices.
+    <button class="sm" style="margin-left:8px"
+      onclick="confirmPost('/api/phone-access',
+        'Turn phone access off? Only this computer will be able to open the panel.',
+        {allow:false})">turn off</button></p>`;
+  if(p.restart_pending) return `<div class="alert warn" style="margin-top:14px">
+    ${ICON.todo}<div><b>Almost there — the panel has to be started again.</b>
+    <ol style="margin:8px 0 0; padding-left:18px; line-height:1.9">
+      <li>Close the black window this panel is running in
+          (or press <b>Ctrl+C</b> in it).</li>
+      <li>Double-click <b>${esc(p.launcher)}</b> in the project folder.</li>
+      <li>Come back to this page — the QR code will then work from your phone.</li>
+    </ol>
+    <p class="hint" style="margin:10px 0 0">Prefer a terminal? From
+      <code>${esc(p.project_dir)}</code> run
+      <code>${esc(p.manual_command)}</code></p></div></div>`;
+  return `<div class="alert warn" style="margin-top:14px">${ICON.todo}
+    <div><b>The panel only accepts connections from this computer.</b>
+    Your phone can scan the code, but the page won't load until you allow it.
+    <div class="row" style="margin-top:10px">
+      <button class="sm primary" onclick="confirmPost('/api/phone-access',
+        'Let your other devices open this panel?\\n\\nOnly devices on your own Tailscale network can reach it, and they still need the password.',
+        {allow:true})">allow my phone</button></div></div></div>`;
 }
 
 async function loadSsh(){
