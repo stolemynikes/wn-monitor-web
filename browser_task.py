@@ -9,6 +9,7 @@ writes when the user clicks "I'm done".
 """
 
 import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -17,6 +18,7 @@ PROJECT_DIR = Path(__file__).resolve().parent
 PROFILE_DIR = PROJECT_DIR / "whatnot-profile"
 PROFILE_BACKUP_DIR = PROJECT_DIR / "whatnot-profile-backup"
 DONE_FILE = PROJECT_DIR / ".login_done"
+RESULT_FILE = PROJECT_DIR / ".login_result"   # last outcome, shown in the panel
 LOGIN_TIMEOUT_SECONDS = 900  # 15 min, then close on its own
 
 
@@ -63,22 +65,63 @@ def backup_profile(source_dir: Path = PROFILE_DIR, backup_dir: Path = PROFILE_BA
 
 def whatnot_cookie_count() -> int:
     """How many whatnot.com cookies the profile holds — used to tell whether a
-    login actually took, without launching anything."""
-    import sqlite3
-    import tempfile
-    src = PROFILE_DIR / "Default" / "Cookies"
-    if not src.exists():
-        return 0
-    tmp = Path(tempfile.mkdtemp()) / "c"
+    login actually took, without launching anything.
+
+    Delegates to profile_tools so this and the panel's badge can never disagree
+    about where the cookie DB lives.
+    """
+    import profile_tools
+    return profile_tools.session_state()["cookie_count"]
+
+
+def chrome_owns_profile() -> bool:
+    """True while any Chrome process still has our profile open.
+
+    Chrome does not always stay in the process we launched: on Windows it
+    regularly hands the profile to a relaunched chrome.exe and the original
+    exits within a second. Treating that exit as "the user closed the window"
+    would end the login before they had typed anything — and then nothing gets
+    saved, which is exactly what "no profile yet" looks like afterwards.
+    """
     try:
-        shutil.copy(src, tmp)
-        with sqlite3.connect(tmp) as con:
-            return con.execute("SELECT COUNT(*) FROM cookies "
-                               "WHERE host_key LIKE '%whatnot%'").fetchone()[0]
+        import psutil
+    except ImportError:
+        return False
+    marker = f"--user-data-dir={PROFILE_DIR}"
+    for proc in psutil.process_iter(["cmdline"]):
+        try:
+            if marker in (proc.info["cmdline"] or []):
+                return True
+        except Exception:      # incl. bare PermissionError from the OS
+            continue
+    return False
+
+
+def close_chrome(proc) -> None:
+    """Shut the login browser down and leave nothing holding the profile.
+
+    Orphaned Chrome children keep file handles on whatnot-profile/, which is
+    what makes the folder undeletable ("in use by another process") later.
+    """
+    try:
+        import psutil
+        tree = psutil.Process(proc.pid).children(recursive=True)
     except Exception:
-        return 0
-    finally:
-        shutil.rmtree(tmp.parent, ignore_errors=True)
+        tree = []
+    proc.terminate()
+    try:
+        proc.wait(timeout=20)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+    for child in tree:
+        try:
+            child.kill()
+        except Exception:
+            pass
+    for _ in range(20):        # a relaunched chrome.exe isn't in our tree
+        if not chrome_owns_profile():
+            return
+        time.sleep(0.5)
 
 
 def login() -> None:
@@ -92,17 +135,15 @@ def login() -> None:
     means a real person really is doing the login; the radar then reuses the
     session that produced.
     """
-    import subprocess
-
     DONE_FILE.unlink(missing_ok=True)
+    RESULT_FILE.unlink(missing_ok=True)
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     before = whatnot_cookie_count()
 
     chrome = find_google_chrome()
     if not chrome:
-        print("Google Chrome not found — install it, or log in with "
-              "`python monitor.py login` instead.", flush=True)
-        return
+        return _report("Google Chrome not found — install it, or log in with "
+                       "`python monitor.py login` instead.")
 
     print("Opening Chrome. Log in to Whatnot, then click \"I'm done\" in the "
           "panel (or just close the window).", flush=True)
@@ -114,27 +155,34 @@ def login() -> None:
 
     deadline = time.time() + LOGIN_TIMEOUT_SECONDS
     while time.time() < deadline:
-        if proc.poll() is not None:      # user closed Chrome themselves
-            break
         if DONE_FILE.exists():           # user pressed the panel button
-            proc.terminate()             # graceful, so Chrome flushes cookies
-            try:
-                proc.wait(timeout=20)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+            close_chrome(proc)
             break
+        if proc.poll() is not None and not chrome_owns_profile():
+            break                        # window really is gone
         time.sleep(1)
     DONE_FILE.unlink(missing_ok=True)
 
-    time.sleep(1)  # let the cookie DB settle after shutdown
+    time.sleep(2)  # let the cookie DB settle after shutdown
     after = whatnot_cookie_count()
     if after > 0:
-        print(f"Session saved — {after} whatnot cookies in the profile "
-              f"(was {before}).", flush=True)
+        _report(f"Session saved — {after} whatnot cookies in the profile "
+                f"(was {before}).")
     else:
-        print("No Whatnot cookies found — the login didn't complete. "
-              "Try again and make sure you're signed in before closing.",
-              flush=True)
+        _report("No Whatnot cookies were saved — the login didn't complete. "
+                "Run Login again and make sure you are signed in on "
+                "whatnot.com before clicking \"I'm done\".")
+
+
+def _report(message: str) -> None:
+    """Say it on stdout and leave it where the panel can read it — the panel
+    discards this process's output, so without the file the user is told
+    nothing at all about why a login didn't take."""
+    print(message, flush=True)
+    try:
+        RESULT_FILE.write_text(message, encoding="utf-8")
+    except OSError:
+        pass
 
 
 if __name__ == "__main__":

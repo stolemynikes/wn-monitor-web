@@ -9,6 +9,7 @@ Two very different operations, deliberately kept separate:
 import shutil
 import sqlite3
 import tempfile
+import time
 from pathlib import Path
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -22,27 +23,66 @@ CACHE_PATHS = [
     "GraphiteDawnCache", "GPUPersistentCache", "ShaderCache",
 ]
 
+# Where the cookie DB lives depends on the build: Chrome moved it under
+# Default/Network, Playwright's Chromium still writes Default/Cookies. The
+# login uses real Chrome and the radar may use either, so always check both —
+# looking in one place only is why a good session reported "no profile yet".
+COOKIE_PATHS = [
+    "Default/Network/Cookies", "Default/Network/Cookies-journal",
+    "Default/Cookies", "Default/Cookies-journal",
+]
+
 # The actual session. Deleting these means logging in again.
-SITE_DATA_PATHS = [
-    "Default/Cookies", "Default/Cookies-journal", "Default/Local Storage",
-    "Default/Session Storage", "Default/IndexedDB", "Default/Service Worker",
+SITE_DATA_PATHS = COOKIE_PATHS + [
+    "Default/Local Storage", "Default/Session Storage",
+    "Default/IndexedDB", "Default/Service Worker",
 ]
 
 
 def _size(path: Path) -> int:
-    if not path.exists():
-        return 0
-    if path.is_file():
-        return path.stat().st_size
-    return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+    """Bytes under path, tolerating files that vanish mid-walk.
+
+    We measure a profile a live Chrome is writing to: it evicts cache entries
+    constantly, so a file listed by rglob is routinely gone by the time we stat
+    it. That raced with the panel's 2.5s poll and took /api/status down with a
+    FileNotFoundError. A size that is a few KB stale is fine; a 500 is not.
+    """
+    total = 0
+    try:
+        if not path.exists():
+            return 0
+        if path.is_file():
+            return path.stat().st_size
+        for f in path.rglob("*"):
+            try:
+                if f.is_file():
+                    total += f.stat().st_size
+            except OSError:
+                continue          # deleted, or a symlink we may not follow
+    except OSError:
+        pass
+    return total
 
 
-def sizes() -> dict:
-    """Profile size split into what's disposable and what isn't."""
-    cache = sum(_size(PROFILE_DIR / p) for p in CACHE_PATHS)
-    total = _size(PROFILE_DIR)
-    return {"total_bytes": total, "cache_bytes": cache,
-            "session_bytes": sum(_size(PROFILE_DIR / p) for p in SITE_DATA_PATHS)}
+_SIZE_CACHE: dict = {"at": 0.0, "value": None}
+SIZE_CACHE_SECONDS = 30
+
+
+def sizes(max_age: float = SIZE_CACHE_SECONDS) -> dict:
+    """Profile size split into what's disposable and what isn't.
+
+    Cached: this walks every file in a profile that routinely passes a
+    gigabyte, and the panel asks for status every 2.5 seconds.
+    """
+    if _SIZE_CACHE["value"] is not None and time.time() - _SIZE_CACHE["at"] < max_age:
+        return _SIZE_CACHE["value"]
+    value = {
+        "total_bytes": _size(PROFILE_DIR),
+        "cache_bytes": sum(_size(PROFILE_DIR / p) for p in CACHE_PATHS),
+        "session_bytes": sum(_size(PROFILE_DIR / p) for p in SITE_DATA_PATHS),
+    }
+    _SIZE_CACHE.update(at=time.time(), value=value)
+    return value
 
 
 def _delete(paths) -> int:
@@ -54,6 +94,7 @@ def _delete(paths) -> int:
             shutil.rmtree(target, ignore_errors=True)
         elif target.exists():
             target.unlink(missing_ok=True)
+    _SIZE_CACHE["value"] = None   # the panel must show the new size at once
     return freed
 
 
@@ -80,16 +121,32 @@ def reset_profile() -> int:
     freed = _size(PROFILE_DIR)
     shutil.rmtree(PROFILE_DIR, ignore_errors=True)
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    _SIZE_CACHE["value"] = None
     return freed
+
+
+def cookie_db() -> Path | None:
+    """The profile's cookie database, wherever this browser build keeps it."""
+    for rel in COOKIE_PATHS:
+        if rel.endswith("-journal"):
+            continue
+        candidate = PROFILE_DIR / rel
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def session_state() -> dict:
     """Whether a Whatnot session looks present, read straight from the cookie
     DB — far cheaper than launching a browser to find out."""
-    cookies = PROFILE_DIR / "Default" / "Cookies"
-    if not cookies.exists():
-        return {"logged_in": False, "cookie_count": 0,
-                "detail": "no profile yet — run Login"}
+    cookies = cookie_db()
+    if cookies is None:
+        # Distinguish the two: "never logged in" and "the browser opened but
+        # the login never completed" need different things from the user.
+        detail = ("no profile yet — run Login" if not PROFILE_DIR.exists()
+                  else "profile exists but holds no cookies — the login didn't "
+                       "finish, run Login again")
+        return {"logged_in": False, "cookie_count": 0, "detail": detail}
     tmp = Path(tempfile.mkdtemp()) / "Cookies"  # copy: the live DB may be locked
     try:
         shutil.copy(cookies, tmp)

@@ -24,6 +24,15 @@ import requests
 
 HTTP = requests.Session()  # connection reuse across notifications
 
+# Windows consoles and files default to the legacy code page (cp1252), which
+# cannot encode the emoji in notification titles — a 🎁 then raises
+# UnicodeEncodeError and looks like a failed send. Force UTF-8 everywhere.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):   # already-wrapped or non-tty stream
+        pass
+
 PROJECT_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = PROJECT_DIR / "config.json"
 CONFIG_EXAMPLE_PATH = PROJECT_DIR / "config.example.json"
@@ -98,8 +107,14 @@ def audit_send(backend: str, priority: str, title: str, outcome: str) -> None:
     """One line per notification attempt — the evidence trail for comparing
     what was sent against what the phone actually displayed."""
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open(SEND_LOG_PATH, "a") as f:
-        f.write(f"{stamp} | {backend} | {priority} | {outcome} | {title}\n")
+    try:
+        with open(SEND_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(f"{stamp} | {backend} | {priority} | {outcome} | {title}\n")
+    except (OSError, UnicodeError) as exc:
+        # The audit trail is a convenience. If it can't be written the push has
+        # already gone out, so this must never surface as a failed send — that
+        # would make the caller retry a notification the phone already has.
+        log(f"could not write {SEND_LOG_PATH.name}: {exc.__class__.__name__}")
 
 
 def load_config() -> dict:
@@ -110,20 +125,20 @@ def load_config() -> dict:
             "then set ntfy_topic to a long random string (topics are public!) "
             "and subscribe to it in the ntfy app on your phone."
         )
-    with open(CONFIG_PATH) as f:
+    with open(CONFIG_PATH, encoding="utf-8") as f:
         return json.load(f)
 
 
 def load_state() -> dict:
     if STATE_PATH.exists():
-        with open(STATE_PATH) as f:
+        with open(STATE_PATH, encoding="utf-8") as f:
             return json.load(f)
     return {}
 
 
 def save_state(state: dict) -> None:
     tmp = STATE_PATH.with_suffix(".json.tmp")
-    with open(tmp, "w") as f:
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
     tmp.replace(STATE_PATH)
 
@@ -133,7 +148,7 @@ def remove_bought_seller(seller: str) -> bool:
     stale manual buyer-eligibility flag doesn't re-arm on restart. Returns True
     if the config changed."""
     try:
-        with open(CONFIG_PATH) as f:
+        with open(CONFIG_PATH, encoding="utf-8") as f:
             cfg = json.load(f)
     except (OSError, ValueError):
         return False
@@ -143,7 +158,7 @@ def remove_bought_seller(seller: str) -> bool:
         return False
     cfg["bought_sellers"] = kept
     tmp = CONFIG_PATH.with_suffix(".json.tmp")
-    with open(tmp, "w") as f:
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)
     tmp.replace(CONFIG_PATH)
     return True
@@ -735,7 +750,7 @@ def cmd_run(config: dict) -> None:
         if not DISCOVERY_QUERY_PATH.exists():
             sys.exit(f"{DISCOVERY_QUERY_PATH.name} is missing — re-capture the "
                      "GetFeed query (see discovery comment block).")
-        disc_query = DISCOVERY_QUERY_PATH.read_text()
+        disc_query = DISCOVERY_QUERY_PATH.read_text(encoding="utf-8")
 
     notifier = make_notifier(config)
     state = load_state()

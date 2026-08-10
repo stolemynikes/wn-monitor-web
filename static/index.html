@@ -174,6 +174,7 @@
          backdrop-filter:blur(14px)}
   .alert.warn{border-color:rgba(245,158,11,.35); background:rgba(245,158,11,.1); color:#FCD9A0}
   .alert.bad{border-color:rgba(255,95,87,.35); background:rgba(255,95,87,.1); color:#FFC4C0}
+  .alert.ok{border-color:rgba(34,197,94,.35); background:rgba(34,197,94,.1); color:#B7EFC5}
   .cmd{display:flex; gap:8px; align-items:center; margin-top:8px}
   .cmd code{flex:1; min-width:0; padding:11px 13px; border-radius:11px;
             background:rgba(0,0,0,.45); border:1px solid var(--hair);
@@ -260,6 +261,7 @@
     <section class="card" id="cardLogin">
       <h2>whatnot login <span class="badge" id="loginBadge">–</span></h2>
       <p class="saved" id="sessionSaved"></p>
+      <p class="saved" id="loginResult"></p>
       <p class="saved" id="profSize"></p>
       <div class="row" style="margin-top:12px">
         <button class="sm" onclick="post('/api/login/start')">log in</button>
@@ -381,18 +383,33 @@ async function refresh(){
   const run=s.control.running;
   $('#pill').className='status '+(run?'on':'off');
   $('#stateTxt').textContent=run?'running':'stopped';
-  $('#btnStart').disabled=run; $('#btnStop').disabled=!run;
+  // Starting half-configured makes real traffic to Whatnot and can still send
+  // you nothing, so hold Start until setup is done — overridable, never silent.
+  const rd=s.readiness||{ready:true,steps:[],missing:[]};
+  $('#btnStart').disabled=run||!rd.ready;
+  $('#btnStart').title=rd.ready?'':'still to do: '+rd.missing.join(', ');
+  $('#btnStop').disabled=!run;
+  renderSetup(rd);
   $('#uptime').textContent=s.control.uptime_seconds?'up '+Math.floor(s.control.uptime_seconds/60)+'m':'';
 
   const sess=s.session; setCard('#cardLogin','#loginBadge',sess.logged_in);
   $('#sessionSaved').innerHTML=sess.logged_in
     ?`${ICON.ok} logged in <b>(${sess.cookie_count} cookies)</b>`:`${ICON.todo} ${esc(sess.detail)}`;
+  $('#loginResult').textContent=sess.logged_in?'':(s.login_result||'');
   const cache=s.profile.cache_bytes;
   $('#profSize').textContent=`profile ${fmt(s.profile.total_bytes)} · cache ${fmt(cache)}`;
   $('#btnCache').textContent=cache>3e8?`clear cache (${fmt(cache)})`:'clear cache';
   $('#btnDone').style.display=s.login_in_progress?'':'none';
 
   const a=[];
+  if(!rd.ready&&!run)a.push(`<div class="alert warn">${ICON.todo}<div><b>Not set up yet.</b>
+    Still to do: ${esc(rd.missing.join(', '))}. <button class="sm" style="margin-left:8px"
+    onclick="post('/api/start',{force:true})">start anyway</button></div></div>`);
+  // Logging in requires the radar to be stopped, so the last setup step always
+  // leaves it off. Without this the panel just goes quiet and looks finished.
+  if(rd.ready&&!run)a.push(`<div class="alert ok">${ICON.ok}<div><b>Everything is set up.</b>
+    The radar isn't watching yet. <button class="sm primary" style="margin-left:8px"
+    onclick="post('/api/start')">start the radar</button></div></div>`);
   if(s.control.foreign?.length)a.push(`<div class="alert bad">${ICON.todo}<div><b>Another radar is running elsewhere.</b>
     Two at once doubles traffic to Whatnot and risks a block. Stop the other one first.</div></div>`);
   if(window._restartNeeded&&run)a.push(`<div class="alert warn">${ICON.todo}<div><b>Settings changed.</b>
@@ -438,16 +455,19 @@ async function loadConfig(){
         onclick="toggleCountry(this)">${ICON.ok}${esc(label)}</button>`).join('');
   }
 
-  const steps=[['phone alerts',set],['whatnot login',null],['what to watch',!!src]];
-  steps[1][1]=(await(await fetch('/api/status')).json()).session.logged_in;
-  const done=steps.filter(s=>s[1]).length;
-  setCard('#cardSetup','#setupBadge',done===steps.length);
-  $('#setupBadge').textContent=`${done}/${steps.length}`;
-  $('#setupBadge').className='badge '+(done===steps.length?'ok':'todo');
-  $('#setupList').innerHTML=steps.map(([n,ok])=>
-    `<div style="display:flex;gap:9px;align-items:center;color:${ok?'var(--ok)':'var(--muted)'}">
-      ${ok?ICON.ok:ICON.todo}<span style="color:${ok?'var(--ink)':'var(--muted)'}">${n}</span>
-      ${ok?'':'<span style="margin-left:auto;font-size:11px">pending</span>'}</div>`).join('');
+}
+
+// Driven by the server's readiness check, the same one that gates Start — so
+// the checklist and the button can never disagree about what's missing.
+function renderSetup(rd){
+  const done=rd.steps.filter(s=>s.done).length, total=rd.steps.length;
+  setCard('#cardSetup','#setupBadge',rd.ready);
+  $('#setupBadge').textContent=`${done}/${total}`;
+  $('#setupBadge').className='badge '+(rd.ready?'ok':'todo');
+  $('#setupList').innerHTML=rd.steps.map(s=>
+    `<div style="display:flex;gap:9px;align-items:center;color:${s.done?'var(--ok)':'var(--muted)'}">
+      ${s.done?ICON.ok:ICON.todo}<span style="color:${s.done?'var(--ink)':'var(--muted)'}">${esc(s.label)}</span>
+      ${s.done?'':`<span style="margin-left:auto;font-size:11px">${esc(s.why)}</span>`}</div>`).join('');
 }
 
 function toggleCountry(btn){
@@ -466,12 +486,15 @@ async function loadPhone(){
       devices need to be on the same private network. The easy way is
       <b>Tailscale</b> — free, and it works over mobile data too.</p>
       <ol class="hint" style="line-height:1.9; padding-left:18px">
-        <li>Install Tailscale on this computer and on your phone
-            (<a href="https://tailscale.com/download" target="_blank"
-             rel="noopener" style="color:var(--accent)">tailscale.com/download</a>).</li>
+        <li>Install Tailscale on this computer and on your phone.</li>
         <li>Sign in with the same account on both.</li>
         <li>Come back here — this card will show a QR code to scan.</li>
       </ol>
+      <div class="cmd"><code>https://tailscale.com/download</code>
+        <button class="sm" aria-label="Open the Tailscale download page"
+          onclick="window.open('https://tailscale.com/download','_blank','noopener')">open</button>
+        <button class="sm" aria-label="Copy the Tailscale download address"
+          onclick='copyCmd("https://tailscale.com/download")'>${ICON.copy}</button></div>
       <p class="hint"><b>Don't</b> put this panel on the open internet instead.
       Anyone who finds it could start your radar, read your log and change your
       settings.</p>`;
@@ -510,10 +533,20 @@ async function loadSsh(){
   try{
     const s=await(await fetch('/api/ssh-info')).json();
     $('#sshHint').textContent=s.remote_login_hint+'.';
+    // Three near-identical 80-character commands are indistinguishable at a
+    // glance — the label says which one you are about to copy.
+    const WHAT={start:'begin watching', stop:'stop watching',
+                status:'is it running?'};
     $('#sshCmds').innerHTML=Object.entries(s.commands).map(([k,v])=>
-      `<div class="cmd"><code>${esc(v)}</code>
-       <button class="sm" aria-label="Copy ${k} command"
-         onclick='copyCmd(${JSON.stringify(v)})'>${ICON.copy}</button></div>`).join('');
+      `<div style="margin-top:12px">
+         <div style="display:flex; gap:8px; align-items:baseline">
+           <b style="font-size:12px; letter-spacing:.06em; text-transform:uppercase">${esc(k)}</b>
+           <span class="hint" style="margin:0">${esc(WHAT[k]||'')}</span>
+         </div>
+         <div class="cmd"><code>${esc(v)}</code>
+          <button class="sm" aria-label="Copy the ${esc(k)} command"
+            onclick='copyCmd(${JSON.stringify(v)})'>${ICON.copy}</button></div>
+       </div>`).join('');
   }catch{}
 }
 const copyCmd=t=>navigator.clipboard?.writeText(t).then(()=>toast('copied'),()=>toast('copy failed',true));

@@ -109,14 +109,17 @@ async def guard(request, call_next):
 
 
 def load_config() -> dict:
+    # encoding pinned on purpose: the file is written as UTF-8 and holds
+    # accented names ("Pokémon cards…"). Left to the locale, a Windows panel
+    # reads it back as cp1252 and the category no longer matches its preset.
     if not CONFIG_PATH.exists():
-        return json.loads(EXAMPLE_PATH.read_text())
-    return json.loads(CONFIG_PATH.read_text())
+        return json.loads(EXAMPLE_PATH.read_text(encoding="utf-8"))
+    return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
 
 
 def save_config(cfg: dict) -> None:
     tmp = CONFIG_PATH.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
+    tmp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
     tmp.replace(CONFIG_PATH)
 
 
@@ -131,15 +134,58 @@ def index():
     return FileResponse(STATIC / "index.html")
 
 
+def readiness() -> dict:
+    """The three things that must be done before starting is worth doing.
+
+    Kept server-side so the Start button and the setup checklist can't drift
+    apart, and so a start over SSH or from the phone is checked the same way.
+    """
+    cfg = load_config()
+    topic = str(cfg.get("ntfy_topic", ""))
+    alerts = (bool(cfg.get("bark_key")) if cfg.get("notifier", "bark") == "bark"
+              else bool(topic) and "CHANGE-ME" not in topic)
+    watching = bool((cfg.get("discovery") or {}).get("sources")) or bool(cfg.get("sellers"))
+    steps = [
+        {"id": "notifier", "label": "phone alerts", "done": alerts,
+         "why": "nothing can reach your phone without it"},
+        {"id": "login", "label": "whatnot login", "done":
+            profile_tools.session_state()["logged_in"],
+         "why": "logged out, giveaways you are shown may not be enterable"},
+        {"id": "watch", "label": "what to watch", "done": watching,
+         "why": "no category or seller means nothing to watch"},
+    ]
+    return {"steps": steps, "ready": all(s["done"] for s in steps),
+            "missing": [s["label"] for s in steps if not s["done"]]}
+
+
+def login_running() -> bool:
+    """A login is in progress only while its helper process is actually alive —
+    a leftover marker from a crashed helper must not strand the panel showing
+    an "I'm done" button forever."""
+    marker = PROJECT_DIR / ".login_running"
+    try:
+        pid = int(marker.read_text().strip())
+    except (OSError, ValueError):
+        return False
+    import psutil
+    if psutil.pid_exists(pid):
+        return True
+    marker.unlink(missing_ok=True)
+    return False
+
+
 @app.get("/api/status")
 def api_status():
     st = control.status(log_lines=1)
+    result = PROJECT_DIR / ".login_result"
     return {
         "control": st,
         "config_exists": CONFIG_PATH.exists(),
         "session": profile_tools.session_state(),
         "profile": profile_tools.sizes(),
-        "login_in_progress": (PROJECT_DIR / ".login_running").exists(),
+        "login_in_progress": login_running(),
+        "login_result": result.read_text(encoding="utf-8") if result.exists() else "",
+        "readiness": readiness(),
     }
 
 
@@ -147,7 +193,8 @@ def api_status():
 def api_log(lines: int = 200):
     if not control.LOG_FILE.exists():
         return {"lines": []}
-    return {"lines": control.LOG_FILE.read_text(errors="replace").splitlines()[-lines:]}
+    return {"lines": control.LOG_FILE.read_text(
+        encoding="utf-8", errors="replace").splitlines()[-lines:]}
 
 
 class StartReq(BaseModel):
@@ -156,6 +203,12 @@ class StartReq(BaseModel):
 
 @app.post("/api/start")
 def api_start(req: StartReq):
+    if not req.force:
+        state = readiness()
+        if not state["ready"]:
+            raise HTTPException(409, "not set up yet — still to do: "
+                                     + ", ".join(state["missing"])
+                                     + ". Finish those, or use “start anyway”.")
     return {"message": control.start(force=req.force)}
 
 
@@ -292,6 +345,7 @@ def api_login_start():
     require_stopped()
     marker = PROJECT_DIR / ".login_running"
     (PROJECT_DIR / ".login_done").unlink(missing_ok=True)
+    (PROJECT_DIR / ".login_result").unlink(missing_ok=True)
     proc = subprocess.Popen([sys.executable, str(PROJECT_DIR / "browser_task.py"),
                              "login"], cwd=str(PROJECT_DIR),
                             stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
@@ -301,9 +355,11 @@ def api_login_start():
 
 @app.post("/api/login/finish")
 def api_login_finish():
+    # The marker stays until browser_task actually exits: it still has to close
+    # Chrome and count the cookies, and clearing it here would report "done"
+    # seconds before we know whether anything was saved.
     (PROJECT_DIR / ".login_done").touch()
-    (PROJECT_DIR / ".login_running").unlink(missing_ok=True)
-    return {"message": "closing browser and saving session"}
+    return {"message": "closing browser and saving session…"}
 
 
 @app.post("/api/clear-cache")
@@ -450,8 +506,50 @@ def main() -> None:
         threading.Thread(target=lambda: (time.sleep(1.5), webbrowser.open(url)),
                          daemon=True).start()
 
+    serve(args.host, args.port)
+
+
+def serve(host: str, port: int) -> None:
     import uvicorn
-    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    server = uvicorn.Server(uvicorn.Config(app, host=host, port=port,
+                                           log_level="warning"))
+    if platform.system() != "Windows":
+        server.run()
+        _farewell()
+        return
+
+    # Windows only: the proactor event loop wakes for socket I/O, not for
+    # signals, so an idle panel swallows Ctrl+C completely and the window can
+    # only be closed by killing it. Take the signal ourselves and run a
+    # heartbeat that gives the loop a reason to wake up and see the flag.
+    import asyncio
+    import signal
+
+    server.install_signal_handlers = lambda: None
+
+    async def run() -> None:
+        def stop(*_):
+            server.should_exit = True
+        for sig in (signal.SIGINT, signal.SIGBREAK):
+            signal.signal(sig, stop)
+        task = asyncio.ensure_future(server.serve())
+        while not task.done():
+            await asyncio.sleep(0.2)
+        await task
+
+    try:
+        asyncio.run(run())
+    except KeyboardInterrupt:
+        pass
+    _farewell()
+
+
+def _farewell() -> None:
+    still_running = control.read_pid() is not None
+    print("\n  Panel stopped."
+          + ("  The radar is still running in the background — "
+             "'python control.py stop' ends it." if still_running else "")
+          + "\n", flush=True)
 
 
 if __name__ == "__main__":

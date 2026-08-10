@@ -122,7 +122,7 @@ def start(force: bool = False) -> str:
     else:
         kwargs["start_new_session"] = True  # survive the parent shell closing
 
-    with open(LOG_FILE, "a", buffering=1) as log:
+    with open(LOG_FILE, "a", buffering=1, encoding="utf-8") as log:
         proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT,
                                 cwd=str(PROJECT_DIR), **kwargs)
     PID_FILE.write_text(str(proc.pid))
@@ -133,27 +133,63 @@ def start(force: bool = False) -> str:
     return f"started (pid {proc.pid})"
 
 
+def _is_monitor(proc) -> bool:
+    """True if this process is our monitor.py itself (not a wrapper)."""
+    try:
+        argv = proc.cmdline() or []
+    except Exception:
+        return False
+    script = next((a for a in argv if a.endswith("monitor.py")), None)
+    try:
+        return script is not None and Path(script).resolve() == MONITOR
+    except OSError:
+        return False
+
+
 def stop() -> str:
+    """Stop the radar and everything it started.
+
+    Waiting on the monitor alone is not enough. Measured 2026-08-10: the
+    monitor takes SIGTERM and exits cleanly, proc.wait() returns, we report
+    "stopped" — and its browser child is still alive holding whatnot-profile/
+    open, which is what makes the folder undeletable afterwards ("in use by
+    another process"). Wrappers make it worse: xvfb-run on a headless Linux box
+    sits between us and the monitor. So collect the whole tree up front, signal
+    the monitor itself, and wait on all of it before declaring the radar
+    stopped.
+    """
     pid = read_pid()
     if pid is None:
         return "not running"
-    proc = psutil.Process(pid)
+    try:
+        proc = psutil.Process(pid)
+        tree = proc.children(recursive=True)
+    except psutil.Error:
+        PID_FILE.unlink(missing_ok=True)
+        return "not running"
+
     # Graceful first: the monitor closes tabs and flushes state on SIGTERM.
-    try:
-        if IS_WINDOWS:
-            proc.send_signal(signal.CTRL_BREAK_EVENT)
-        else:
-            proc.send_signal(signal.SIGTERM)
-    except (psutil.NoSuchProcess, OSError):
-        pass
-    try:
-        proc.wait(timeout=STOP_GRACE_SECONDS)
-        outcome = "stopped"
-    except psutil.TimeoutExpired:
-        for child in proc.children(recursive=True):
-            child.kill()
-        proc.kill()
-        outcome = "force-killed (did not exit gracefully)"
+    for target in [proc] + [p for p in tree if _is_monitor(p)]:
+        try:
+            target.send_signal(signal.CTRL_BREAK_EVENT if IS_WINDOWS
+                               else signal.SIGTERM)
+        except (psutil.Error, OSError):
+            pass
+
+    _gone, alive = psutil.wait_procs([proc] + tree, timeout=STOP_GRACE_SECONDS)
+    outcome = "stopped"
+    if alive:
+        # Name which part misbehaved: a lingering browser is routine, a monitor
+        # that ignores SIGTERM is a bug worth seeing in the log.
+        outcome = ("force-killed (the radar did not exit gracefully)"
+                   if any(p.pid == proc.pid for p in alive)
+                   else f"stopped ({len(alive)} leftover browser processes killed)")
+        for survivor in alive:
+            try:
+                survivor.kill()
+            except psutil.Error:
+                pass
+        psutil.wait_procs(alive, timeout=5)
     PID_FILE.unlink(missing_ok=True)
     return outcome
 
@@ -172,7 +208,8 @@ def status(log_lines: int = 5) -> dict:
         except psutil.Error:
             pass
     if LOG_FILE.exists():
-        info["recent_log"] = LOG_FILE.read_text(errors="replace").splitlines()[-log_lines:]
+        info["recent_log"] = LOG_FILE.read_text(
+            encoding="utf-8", errors="replace").splitlines()[-log_lines:]
     return info
 
 
