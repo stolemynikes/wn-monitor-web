@@ -178,7 +178,11 @@
   .cmd{display:flex; gap:8px; align-items:center; margin-top:8px}
   .cmd code{flex:1; min-width:0; padding:11px 13px; border-radius:11px;
             background:rgba(0,0,0,.45); border:1px solid var(--hair);
-            font-size:11.5px; color:#b9c0cc; overflow-x:auto; white-space:nowrap}
+            font-size:11.5px; color:#b9c0cc; overflow-x:auto; white-space:nowrap;
+            /* selectable by hand: the copy button cannot be relied on over
+               plain http, and press-and-hold must stay available as a way out */
+            user-select:text; -webkit-user-select:text;
+            -webkit-touch-callout:default}
   svg{width:15px; height:15px; stroke:currentColor; fill:none; stroke-width:2.2;
       stroke-linecap:round; stroke-linejoin:round; flex:none}
   #toast{position:fixed; left:50%; bottom:26px; transform:translate(-50%,14px);
@@ -197,6 +201,9 @@
     .chip{min-height:44px}
     .tag button{min-height:32px; width:32px}
     #follow{width:20px; height:20px}
+    /* wrap instead of scrolling sideways: you cannot press-and-hold-select
+       text you have to drag a one-line box to see */
+    .cmd code{white-space:pre-wrap; overflow-wrap:anywhere; overflow-x:visible}
   }
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
@@ -598,25 +605,41 @@ function field(label, value, note){
   </div>`;
 }
 
+// "could not connect to the SSH server" is the same message whether the
+// address is wrong or no server was ever installed — so say which it is.
+function sshServerBlock(srv){
+  if(!srv||srv.listening) return '';
+  return `<div class="alert bad">${ICON.todo}<div>
+    <b>No SSH server is running on this computer.</b> Until you fix this, any
+    shortcut will fail with <i>"could not connect to the SSH server"</i> no
+    matter what you put in the fields. ${esc(srv.summary||'')}
+    ${(srv.steps||[]).map(t=>`<p class="hint" style="margin:8px 0 0">${esc(t)}</p>`).join('')}
+    ${(srv.commands||[]).map(c=>`<div class="cmd"><code>${esc(c)}</code>
+      <button class="sm" aria-label="Copy command"
+        onclick='copyCmd(${JSON.stringify(c)})'>${ICON.copy}</button></div>`).join('')}
+  </div></div>`;
+}
+
 function renderSsh(){
   const s=sshInfo; if(!s) return;
   $('#tabShortcut').setAttribute('aria-pressed',String(sshMode==='shortcut'));
   $('#tabTerminal').setAttribute('aria-pressed',String(sshMode==='terminal'));
+  const warn=sshServerBlock(s.ssh_server);
   if(sshMode==='terminal'){
-    $('#sshCmds').innerHTML=Object.entries(s.commands)
+    $('#sshCmds').innerHTML=warn+Object.entries(s.commands)
       .map(([k,v])=>field(k,v,SSH_WHAT[k])).join('');
     return;
   }
   // Shortcuts' "Run Script Over SSH" has its own Host/Port/User/Script boxes
   // and runs Script AS the remote command — the full `ssh user@host '...'`
   // line belongs in a terminal, not in that field.
-  $('#sshCmds').innerHTML=`
+  $('#sshCmds').innerHTML=warn+`
     <p class="hint" style="margin-top:0">In the Shortcuts app: <b>+</b> → add the
       <b>Run Script Over SSH</b> action → fill these in. Make one shortcut per
       button, then long-press it → <b>Add to Home Screen</b>.</p>
     ${field('host',String(s.host))}
     ${field('port',String(s.port))}
-    ${field('user',String(s.user))}
+    ${field('user',String(s.user),'required — leaving this blank fails to connect')}
     <p class="hint" style="margin-top:12px">Set <b>Authentication</b> to your
       password for this computer, or to an SSH key if you have one.</p>
     <p class="hint" style="margin-top:14px; letter-spacing:.08em;
@@ -640,7 +663,30 @@ async function loadSsh(){
     renderSsh();
   }catch{}
 }
-const copyCmd=t=>navigator.clipboard?.writeText(t).then(()=>toast('copied'),()=>toast('copy failed',true));
+// navigator.clipboard only exists in a SECURE context. On a phone the panel is
+// reached over plain http at a tailnet address — not https, not localhost — so
+// the API is simply absent, and `navigator.clipboard?.writeText(t).then(...)`
+// short-circuited to undefined: the buttons did nothing, silently. Hence the
+// execCommand fallback, and hence the text being selectable by hand as well.
+function copyCmd(t){
+  if(window.isSecureContext&&navigator.clipboard){
+    navigator.clipboard.writeText(t).then(()=>toast('copied'),()=>legacyCopy(t));
+  }else{
+    legacyCopy(t);
+  }
+}
+function legacyCopy(t){
+  const el=document.createElement('textarea');
+  el.value=t; el.contentEditable='true';
+  el.style.cssText='position:fixed;top:0;left:0;width:1px;height:1px;opacity:0';
+  document.body.appendChild(el);
+  const range=document.createRange(); range.selectNodeContents(el);
+  const sel=window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+  el.setSelectionRange(0,t.length);              // iOS needs this as well
+  let ok=false; try{ ok=document.execCommand('copy'); }catch{}
+  sel.removeAllRanges(); document.body.removeChild(el);
+  toast(ok?'copied':'could not copy — press and hold the text to select it',!ok);
+}
 
 function addSeller(){const v=$('#blockName').value.trim(); if(!v)return;
   post('/api/seller',{seller:v,list_name:'blacklist'}).then(()=>$('#blockName').value='');}

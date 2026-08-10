@@ -251,6 +251,48 @@ def api_get_config():
     return redacted
 
 
+def ssh_server_state() -> dict:
+    """Is anything listening on port 22 here, and if not, how to fix it.
+
+    "Run Script Over SSH could not connect to the SSH server" is the same
+    message whether the address is wrong, the tailnet is down, or — much more
+    commonly on Windows — no SSH server was ever installed. Checking locally
+    rules the last one in or out before the user starts guessing.
+    """
+    import socket as _socket
+    listening = False
+    for addr in ("127.0.0.1", "::1"):
+        try:
+            with _socket.create_connection((addr, 22), timeout=1):
+                listening = True
+                break
+        except OSError:
+            continue
+    system = platform.system()
+    if system == "Windows":
+        how = {
+            "summary": "Windows does not install an SSH server by default.",
+            "steps": ["Open PowerShell as Administrator (right-click → Run as "
+                      "administrator), then run these three lines."],
+            "commands": [
+                "Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0",
+                "Start-Service sshd",
+                "Set-Service -Name sshd -StartupType Automatic",
+            ],
+        }
+    elif system == "Darwin":
+        how = {"summary": "macOS has one built in, it just needs switching on.",
+               "steps": ["System Settings → General → Sharing → turn on "
+                         "Remote Login."],
+               "commands": []}
+    else:
+        how = {"summary": "Install and enable OpenSSH.",
+               "steps": ["On Debian/Ubuntu:"],
+               "commands": ["sudo apt install openssh-server",
+                            "sudo systemctl enable --now ssh"]}
+    return {"listening": listening, **how}
+
+
 @app.get("/api/ssh-info")
 def api_ssh_info():
     """Ready-made remote-control commands, so the panel can show exactly what
@@ -309,6 +351,7 @@ def api_ssh_info():
         # local name silently fails the moment you leave the house.
         "via": "tailscale" if name else "local network",
         "scripts": scripts,
+        "ssh_server": ssh_server_state(),
         "commands": {action: f"ssh {user}@{hosts[0]} {outer(script)}"
                      for action, script in scripts.items()},
         "remote_login_hint": (
