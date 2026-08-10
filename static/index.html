@@ -481,7 +481,22 @@ async function loadPhone(){
   if(!p.tailscale){
     badge.textContent='setup'; badge.className='badge todo';
     $('#cardPhone').className='card todo';
-    box.innerHTML=`
+    // Installed-but-signed-out is the common case and needs completely
+    // different advice from not-installed. Telling someone to install
+    // software they already have is how you lose them.
+    box.innerHTML=p.tailscale_state==='signed-out'?`
+      <p class="hint" style="margin-top:0">Tailscale is installed here, but this
+      machine isn't connected to your tailnet yet — so there's no address to put
+      in a QR code.</p>
+      <ol class="hint" style="line-height:1.9; padding-left:18px">
+        <li>Open the Tailscale app on this computer and <b>sign in</b>
+            (Windows: the icon in the system tray, bottom-right).</li>
+        <li>Sign in on your phone with the <b>same account</b>.</li>
+        <li>Come back here — the QR code appears by itself.</li>
+      </ol>
+      <p class="hint">The SSH commands below work as soon as this is connected;
+      until then they use this computer's local name, which only works on your
+      home Wi-Fi.</p>`:`
       <p class="hint" style="margin-top:0">To open this panel on your phone, both
       devices need to be on the same private network. The easy way is
       <b>Tailscale</b> — free, and it works over mobile data too.</p>
@@ -532,7 +547,11 @@ async function loadPhone(){
 async function loadSsh(){
   try{
     const s=await(await fetch('/api/ssh-info')).json();
-    $('#sshHint').textContent=s.remote_login_hint+'.';
+    $('#sshHint').innerHTML=esc(s.remote_login_hint)+'. These use <b>'+esc(s.host)
+      +'</b> ('+esc(s.via)+')'
+      +(s.via==='tailscale'?', which works from anywhere.'
+        :' — that name only resolves on your own network. Connect Tailscale to '
+        +'reach it from outside.');
     // Three near-identical 80-character commands are indistinguishable at a
     // glance — the label says which one you are about to copy.
     const WHAT={start:'begin watching', stop:'stop watching',

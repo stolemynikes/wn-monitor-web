@@ -131,9 +131,61 @@ def cookie_db() -> Path | None:
         if rel.endswith("-journal"):
             continue
         candidate = PROFILE_DIR / rel
-        if candidate.exists():
+        # is_file, not exists: opening a directory raises PermissionError on
+        # Windows rather than IsADirectoryError, which reads as a lock.
+        if candidate.is_file():
             return candidate
     return None
+
+
+# Last count we managed to read. Windows keeps the cookie DB locked while the
+# browser has it open, so "can't read it right now" must not be reported as
+# "logged out" — that flips the badge and trips the start gate on a profile
+# that is perfectly fine.
+SEEN_PATH = PROJECT_DIR / ".session_seen"
+
+
+def _remember(count: int) -> None:
+    try:
+        SEEN_PATH.write_text(str(count), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _last_known() -> int:
+    try:
+        return int(SEEN_PATH.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return 0
+
+
+def _count_whatnot_cookies(db: Path) -> int:
+    """Cookies for whatnot.com, read without disturbing the live database.
+
+    Tries the file in place first: SQLite opens read-only/immutable with
+    permissive share flags and often succeeds where a plain copy is refused.
+    Falls back to copying, which works when the file is merely busy.
+    """
+    query = "SELECT COUNT(*) FROM cookies WHERE host_key LIKE '%whatnot%'"
+    try:
+        uri = f"file:{db.as_posix()}?immutable=1"
+        con = sqlite3.connect(uri, uri=True)
+        try:
+            return con.execute(query).fetchone()[0]
+        finally:
+            con.close()
+    except sqlite3.Error:
+        pass
+    tmp = Path(tempfile.mkdtemp()) / "Cookies"
+    try:
+        shutil.copy(db, tmp)
+        con = sqlite3.connect(tmp)
+        try:
+            return con.execute(query).fetchone()[0]
+        finally:
+            con.close()
+    finally:
+        shutil.rmtree(tmp.parent, ignore_errors=True)
 
 
 def session_state() -> dict:
@@ -147,16 +199,16 @@ def session_state() -> dict:
                   else "profile exists but holds no cookies — the login didn't "
                        "finish, run Login again")
         return {"logged_in": False, "cookie_count": 0, "detail": detail}
-    tmp = Path(tempfile.mkdtemp()) / "Cookies"  # copy: the live DB may be locked
     try:
-        shutil.copy(cookies, tmp)
-        with sqlite3.connect(tmp) as con:
-            n = con.execute(
-                "SELECT COUNT(*) FROM cookies WHERE host_key LIKE '%whatnot%'"
-            ).fetchone()[0]
+        n = _count_whatnot_cookies(cookies)
     except (OSError, sqlite3.Error) as exc:
-        return {"logged_in": False, "cookie_count": 0, "detail": f"unreadable: {exc}"}
-    finally:
-        shutil.rmtree(tmp.parent, ignore_errors=True)
-    return {"logged_in": n > 0, "cookie_count": n,
+        if (last := _last_known()):
+            return {"logged_in": True, "cookie_count": last, "locked": True,
+                    "detail": f"{last} whatnot.com cookies — the browser has "
+                              "the file open, so this is the last known count"}
+        return {"logged_in": False, "cookie_count": 0, "locked": True,
+                "detail": "the cookie file is in use by another program — stop "
+                          f"the radar, then reload ({exc.__class__.__name__})"}
+    _remember(n)
+    return {"logged_in": n > 0, "cookie_count": n, "locked": False,
             "detail": f"{n} whatnot.com cookies" if n else "no Whatnot cookies — run Login"}

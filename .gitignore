@@ -10,4 +10,5 @@ radar.log
 .login_done
 .login_running
 .login_result
+.session_seen
 .tmp_launch_check/

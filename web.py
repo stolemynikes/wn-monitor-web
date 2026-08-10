@@ -11,6 +11,7 @@ the open internet: it can start a browser and read your config.
 import argparse
 import io
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -254,7 +255,6 @@ def api_ssh_info():
     """Ready-made remote-control commands, so the panel can show exactly what
     to put in a phone SSH shortcut instead of the user assembling it."""
     import getpass
-    import shutil as _shutil
     import socket
 
     user = getpass.getuser()
@@ -264,18 +264,17 @@ def api_ssh_info():
         hosts.append(f"{short}.local")
     else:
         hosts.append(short)
-    if (ts := _shutil.which("tailscale")):
-        try:  # Tailscale name works from anywhere on the tailnet
-            out = subprocess.run([ts, "status", "--json"], capture_output=True,
-                                 text=True, timeout=4)
-            name = json.loads(out.stdout)["Self"]["DNSName"].rstrip(".")
-            if name:
-                hosts.insert(0, name)
-        except Exception:
-            pass
+    # The tailnet name works from anywhere, the local one only on this network,
+    # so prefer it when there is one.
+    if (name := _tailnet_host()):
+        hosts.insert(0, name)
     ctl = f"{sys.executable} {PROJECT_DIR / 'control.py'}"
     return {
-        "user": user, "hosts": hosts,
+        "user": user, "hosts": hosts, "host": hosts[0],
+        # SSH does not need the QR code — that is only a shortcut for opening
+        # the panel in a phone browser. Say which address these use, because a
+        # local name silently fails the moment you leave the house.
+        "via": "tailscale" if name else "local network",
         "commands": {action: f"ssh {user}@{hosts[0]} '{ctl} {action}'"
                      for action in ("start", "stop", "status")},
         "remote_login_hint": (
@@ -377,19 +376,55 @@ def api_clear_site_data():
                        "you are now logged out, run Login again"}
 
 
-def _tailnet_host() -> str | None:
+def find_tailscale() -> str | None:
+    """The tailscale CLI.
+
+    which() alone is not enough: the Windows installer puts tailscale.exe in
+    Program Files without adding it to PATH, and the macOS App Store build
+    hides it inside the .app. Both look like "Tailscale isn't installed" to a
+    bare which(), which is why a working tailnet showed no QR code.
+    """
     import shutil as _shutil
-    if not (ts := _shutil.which("tailscale")):
-        return None
+    if (found := _shutil.which("tailscale")):
+        return found
+    candidates = [
+        r"C:\Program Files\Tailscale\tailscale.exe",
+        r"C:\Program Files (x86)\Tailscale\tailscale.exe",
+        "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+        "/opt/homebrew/bin/tailscale", "/usr/local/bin/tailscale",
+        "/usr/bin/tailscale",
+    ]
+    if (local := os.environ.get("LOCALAPPDATA")):
+        candidates.append(str(Path(local) / "Tailscale" / "tailscale.exe"))
+    for path in candidates:
+        try:
+            if Path(path).is_file():
+                return path
+        except OSError:
+            continue
+    return None
+
+
+def tailnet_state() -> dict:
+    """Tailnet name plus why it isn't usable, so the panel can tell "install
+    it" apart from "it's installed, just sign in"."""
+    ts = find_tailscale()
+    if not ts:
+        return {"host": None, "state": "missing"}
     try:
         out = subprocess.run([ts, "status", "--json"], capture_output=True,
-                             text=True, timeout=4)
-        data = json.loads(out.stdout)
-        if not data.get("Self", {}).get("Online"):
-            return None
-        return (data["Self"]["DNSName"] or "").rstrip(".") or None
+                             text=True, timeout=6)
+        me = (json.loads(out.stdout) or {}).get("Self") or {}
+        host = (me.get("DNSName") or "").rstrip(".")
+        if not me.get("Online") or not host:
+            return {"host": None, "state": "signed-out"}
+        return {"host": host, "state": "ready"}
     except Exception:
-        return None
+        return {"host": None, "state": "signed-out"}
+
+
+def _tailnet_host() -> str | None:
+    return tailnet_state()["host"]
 
 
 @app.get("/api/phone-info")
@@ -397,10 +432,12 @@ def api_phone_info(request: Request):
     """Everything needed to open the panel on a phone, resolved for THIS
     machine — so nobody has to work out their own hostname."""
     local = (request.client.host if request.client else "") in LOOPBACK
-    host = _tailnet_host()
+    tailnet = tailnet_state()
+    host = tailnet["host"]
     port = request.url.port or 8765
     return {
         "tailscale": bool(host),
+        "tailscale_state": tailnet["state"],
         "url": f"http://{host}:{port}" if host else None,
         # only echo the password to someone already sitting at the machine
         "password": ensure_password() if local else None,
