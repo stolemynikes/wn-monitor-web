@@ -172,7 +172,9 @@ you pasted the key correctly (no spaces). On iPhone, if the notification appears
 but is silent, look in Settings → Notifications → Bark and turn sounds on.
 
 **It says "config.json missing".**
-You skipped the `cp config.example.json config.json` line in Step 4.
+The launcher normally creates this for you. Double-click `start-panel.command`
+(Mac) or `start-panel.bat` (Windows) — running it again is safe and will make
+the file.
 
 **The panel page won't load.**
 The panel only runs while its window is open. Double-click `start-panel.command`
