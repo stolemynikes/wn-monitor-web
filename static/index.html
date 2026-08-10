@@ -20,10 +20,13 @@
     -webkit-font-smoothing:antialiased; font-variant-numeric:tabular-nums;
     overflow-x:hidden;
   }
-  /* ambient light the glass refracts — the whole look depends on this */
-  .blob{position:fixed; border-radius:50%; filter:blur(90px); opacity:.16;
-        pointer-events:none; z-index:0}
-  .b1{width:520px; height:520px; background:#5E6AD2; top:-160px; left:-120px;
+  /* ambient light the glass refracts — the whole look depends on this.
+     Held in a clipping layer: the blobs are wider than a phone and sit at
+     negative offsets, and overflow-x on <body> does NOT clip position:fixed
+     children — without this the page scrolls sideways on mobile. */
+  .bg{position:fixed; inset:0; overflow:hidden; pointer-events:none; z-index:0}
+  .blob{position:absolute; border-radius:50%; filter:blur(90px); opacity:.16}
+  .b1{width:520px; height:520px; background:#5E6AD2; top:-160px; left:-140px;
       animation:drift1 28s ease-in-out infinite}
   .b2{width:440px; height:440px; background:#22C55E; bottom:-180px; right:-100px;
       opacity:.10; animation:drift2 34s ease-in-out infinite}
@@ -61,6 +64,10 @@
        padding:16px; display:grid; gap:14px}
   .grid{display:grid; gap:14px; grid-template-columns:repeat(2,minmax(0,1fr))}
   @media (max-width:780px){ .grid{grid-template-columns:1fr} }
+  /* Grid and flex children default to min-width:auto, so a nowrap element
+     (the long ssh commands) forces the whole page wider than the viewport and
+     the page scrolls sideways. Let them shrink so inner overflow-x works. */
+  main > *, .grid > *, .cmd > *{min-width:0}
 
   /* ---------- glass cards ---------- */
   .card{position:relative; border-radius:var(--r); padding:16px;
@@ -185,7 +192,7 @@
 </style>
 </head>
 <body>
-<div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
+<div class="bg"><div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div></div>
 
 <header>
   <div class="hbar">
