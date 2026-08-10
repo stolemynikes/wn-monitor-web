@@ -9,6 +9,7 @@ the open internet: it can start a browser and read your config.
 """
 
 import argparse
+import io
 import json
 import platform
 import subprocess
@@ -19,8 +20,8 @@ import webbrowser
 from pathlib import Path
 
 try:
-    from fastapi import FastAPI, HTTPException
-    from fastapi.responses import FileResponse, JSONResponse
+    from fastapi import FastAPI, HTTPException, Request
+    from fastapi.responses import FileResponse, JSONResponse, Response
     from pydantic import BaseModel
 except ModuleNotFoundError as exc:  # nearly always: venv not activated
     _venv = Path(__file__).resolve().parent / ".venv"
@@ -45,12 +46,14 @@ EXAMPLE_PATH = PROJECT_DIR / "config.example.json"
 STATIC = PROJECT_DIR / "static"
 
 # Only these may be written from the UI, so a stray field can't inject config.
+SERVE_HOST = "127.0.0.1"   # set from --host at startup
+
 EDITABLE = {
     "my_username", "notifier", "bark_key", "ntfy_topic", "ntfy_server",
     "seller_poll_seconds", "giveaway_poll_seconds", "max_concurrent_streams",
     "pinned_extra_tabs", "watch_giveaways", "headless", "sellers",
     "blacklist", "blacklist_temp", "bought_sellers", "foreign_sellers",
-    "discovery",
+    "discovery", "panel_password",
 }
 
 # Phase 5: presets. Only the Pokémon feedId is one we have actually captured
@@ -64,6 +67,45 @@ CATEGORY_PRESETS = {
 }
 
 app = FastAPI(title="Whatnot Radar")
+
+LOOPBACK = {"127.0.0.1", "::1", "localhost", "testclient"}
+
+
+def ensure_password() -> str:
+    """One random password per install, created on first run. Never shipped in
+    the repo — it lives in the user's own gitignored config."""
+    cfg = load_config()
+    pw = cfg.get("panel_password") or ""
+    if not pw:
+        import secrets
+        pw = "-".join(secrets.token_hex(2) for _ in range(3))  # xxxx-xxxx-xxxx
+        cfg["panel_password"] = pw
+        save_config(cfg)
+    return pw
+
+
+@app.middleware("http")
+async def guard(request, call_next):
+    """No password when you're already on the machine; required from anywhere
+    else. Keeps first-run frictionless while making --host 0.0.0.0 safe on an
+    untrusted network."""
+    if (request.client.host if request.client else "") in LOOPBACK:
+        return await call_next(request)
+    import base64
+    import hmac
+    header = request.headers.get("authorization", "")
+    supplied = ""
+    if header.startswith("Basic "):
+        try:
+            supplied = base64.b64decode(header[6:]).decode().split(":", 1)[-1]
+        except Exception:
+            supplied = ""
+    if not hmac.compare_digest(supplied, ensure_password()):
+        return JSONResponse(
+            {"error": "password required — see the 'use on your phone' card"},
+            status_code=401,
+            headers={"WWW-Authenticate": 'Basic realm="Whatnot Radar"'})
+    return await call_next(request)
 
 
 def load_config() -> dict:
@@ -148,6 +190,9 @@ def api_get_config():
     redacted["ntfy_topic_hint"] = _hint(topic) if topic_set else ""
     redacted.pop("bark_key", None)
     redacted.pop("ntfy_topic", None)
+    # the panel password has its own endpoint (loopback-only); it must never
+    # ride along in a general config fetch
+    redacted.pop("panel_password", None)
     return redacted
 
 
@@ -276,6 +321,63 @@ def api_clear_site_data():
                        "you are now logged out, run Login again"}
 
 
+def _tailnet_host() -> str | None:
+    import shutil as _shutil
+    if not (ts := _shutil.which("tailscale")):
+        return None
+    try:
+        out = subprocess.run([ts, "status", "--json"], capture_output=True,
+                             text=True, timeout=4)
+        data = json.loads(out.stdout)
+        if not data.get("Self", {}).get("Online"):
+            return None
+        return (data["Self"]["DNSName"] or "").rstrip(".") or None
+    except Exception:
+        return None
+
+
+@app.get("/api/phone-info")
+def api_phone_info(request: Request):
+    """Everything needed to open the panel on a phone, resolved for THIS
+    machine — so nobody has to work out their own hostname."""
+    local = (request.client.host if request.client else "") in LOOPBACK
+    host = _tailnet_host()
+    port = request.url.port or 8765
+    return {
+        "tailscale": bool(host),
+        "url": f"http://{host}:{port}" if host else None,
+        # only echo the password to someone already sitting at the machine
+        "password": ensure_password() if local else None,
+        "bound_all": SERVE_HOST != "127.0.0.1",
+        "port": port,
+    }
+
+
+@app.get("/api/phone-qr.svg")
+def api_phone_qr(request: Request):
+    import qrcode
+    import qrcode.image.svg
+    host = _tailnet_host()
+    if not host:
+        raise HTTPException(404, "Tailscale not running")
+    q = qrcode.QRCode(box_size=9, border=2)
+    q.add_data(f"http://{host}:{request.url.port or 8765}")
+    q.make(fit=True)
+    buf = io.BytesIO()
+    q.make_image(image_factory=qrcode.image.svg.SvgPathImage).save(buf)
+    return Response(buf.getvalue(), media_type="image/svg+xml")
+
+
+@app.post("/api/panel-password/regenerate")
+def api_regen_password(request: Request):
+    if (request.client.host if request.client else "") not in LOOPBACK:
+        raise HTTPException(403, "Only from the computer itself")
+    cfg = load_config()
+    cfg.pop("panel_password", None)
+    save_config(cfg)
+    return {"message": f"new password: {ensure_password()}"}
+
+
 @app.get("/api/presets")
 def api_presets():
     return {"countries": COUNTRIES, "categories": CATEGORY_PRESETS}
@@ -319,13 +421,17 @@ def main() -> None:
     ap.add_argument("--no-browser", action="store_true",
                     help="don't open the panel automatically")
     args = ap.parse_args()
+    global SERVE_HOST
+    SERVE_HOST = args.host
     if args.host not in ("127.0.0.1", "localhost"):
-        print(f"WARNING: binding {args.host} — only do this on a private "
-              "network such as Tailscale.")
+        print(f"\n  Reachable on your network ({args.host}).", flush=True)
+        print(f"  Password for remote access: {ensure_password()}", flush=True)
+        print("  Only do this on a private network such as Tailscale — never "
+              "the open internet.", flush=True)
 
     url = f"http://127.0.0.1:{args.port}"
-    print(f"\n  Whatnot Radar panel:  {url}")
-    print("  Leave this window open. Press Ctrl+C to shut the panel down.\n")
+    print(f"\n  Whatnot Radar panel:  {url}", flush=True)
+    print("  Leave this window open. Press Ctrl+C to shut the panel down.\n", flush=True)
     if not args.no_browser:
         # Opening it for them: "nothing happened" is otherwise the most common
         # first-run confusion — the server starts but never shows anything.

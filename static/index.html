@@ -300,10 +300,16 @@
     </section>
   </div>
 
+  <section class="card" id="cardPhone">
+    <h2>use on your phone <span class="badge" id="phoneBadge">–</span></h2>
+    <div id="phoneBody"></div>
+  </section>
+
   <section class="card">
-    <h2>remote control</h2>
-    <p class="hint" style="margin-top:0">Android→Mac and iPhone→Windows both work —
-      any SSH app, or an iOS Shortcut on your home screen. <span id="sshHint"></span></p>
+    <h2>remote control (ssh)</h2>
+    <p class="hint" style="margin-top:0">Prefer the phone panel above. These are for
+      an iOS Shortcut button or any SSH app — Android→Mac and iPhone→Windows both
+      work. <span id="sshHint"></span></p>
     <div id="sshCmds"></div>
   </section>
 </main>
@@ -430,6 +436,57 @@ function toggleCountry(btn){
   btn.setAttribute('aria-pressed',String(!on));
   on?selectedCountries.delete(c):selectedCountries.add(c);
 }
+async function loadPhone(){
+  let p; try{ p=await(await fetch('/api/phone-info')).json(); }catch{ return; }
+  const box=$('#phoneBody'), badge=$('#phoneBadge');
+  if(!p.tailscale){
+    badge.textContent='setup'; badge.className='badge todo';
+    $('#cardPhone').className='card todo';
+    box.innerHTML=`
+      <p class="hint" style="margin-top:0">To open this panel on your phone, both
+      devices need to be on the same private network. The easy way is
+      <b>Tailscale</b> — free, and it works over mobile data too.</p>
+      <ol class="hint" style="line-height:1.9; padding-left:18px">
+        <li>Install Tailscale on this computer and on your phone
+            (<a href="https://tailscale.com/download" target="_blank"
+             rel="noopener" style="color:var(--accent)">tailscale.com/download</a>).</li>
+        <li>Sign in with the same account on both.</li>
+        <li>Come back here — this card will show a QR code to scan.</li>
+      </ol>
+      <p class="hint"><b>Don't</b> put this panel on the open internet instead.
+      Anyone who finds it could start your radar, read your log and change your
+      settings.</p>`;
+    return;
+  }
+  badge.textContent='ready'; badge.className='badge ok';
+  $('#cardPhone').className='card ready';
+  box.innerHTML=`
+    <div style="display:flex; gap:18px; flex-wrap:wrap; align-items:flex-start">
+      <div style="background:#fff; padding:9px; border-radius:12px; line-height:0">
+        <img src="/api/phone-qr.svg" alt="QR code linking to the panel"
+             style="width:132px; height:132px; display:block">
+      </div>
+      <div style="flex:1; min-width:210px">
+        <p class="hint" style="margin-top:0">Scan with your phone camera, or open:</p>
+        <div class="cmd"><code>${esc(p.url)}</code>
+          <button class="sm" aria-label="Copy address"
+            onclick='copyCmd(${JSON.stringify(p.url)})'>${ICON.copy}</button></div>
+        ${p.password?`<p class="saved" style="margin-top:12px">password
+          <b style="letter-spacing:.06em">${esc(p.password)}</b></p>
+          <div class="row" style="margin-top:8px">
+            <button class="sm" onclick="confirmPost('/api/panel-password/regenerate',
+              'Make a new password? You will have to re-enter it on your phone.')">
+              new password</button></div>`:''}
+      </div>
+    </div>
+    ${p.bound_all?'':`<p class="hint" style="margin-top:14px">⚠ Right now the panel
+      only accepts connections from this computer. Restart it with
+      <code style="padding:2px 6px">--host 0.0.0.0</code> to let your phone in.</p>`}
+    <p class="hint">Your phone will ask for the password once and remember it.
+      Only your own Tailscale devices can reach this — it is not on the public
+      internet, and it shouldn't be.</p>`;
+}
+
 async function loadSsh(){
   try{
     const s=await(await fetch('/api/ssh-info')).json();
@@ -460,7 +517,7 @@ function saveSource(){
 $('#notifier').onchange=loadConfig;
 $('#btnStart').onclick=()=>post('/api/start');
 $('#btnStop').onclick=()=>post('/api/stop');
-refresh(); loadConfig(); loadSsh(); setInterval(refresh,2500);
+refresh(); loadConfig(); loadSsh(); loadPhone(); setInterval(refresh,2500);
 </script>
 </body>
 </html>
