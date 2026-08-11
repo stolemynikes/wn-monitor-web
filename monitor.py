@@ -109,6 +109,60 @@ PROBE_CLEAR = """() => {
 
 PROBE_INTERVAL = 0.25   # seconds between probe ticks
 
+# Anything further off-screen than this is not a window a person is using.
+# Windows parks minimised windows at -32000,-32000, which is a free, very
+# high-confidence bot signal for anyone reading window.screenX from JS.
+OFFSCREEN_LIMIT = -10000
+
+
+def normalise_window(ctx):
+    """Report the browser window's real position, and drag it back on screen.
+
+    Reported 2026-08-11: on Windows the radar came up minimised with the
+    minimise option switched OFF, so nothing here put it there — Chrome was
+    started that way, or restored a stored off-screen placement. That matters
+    beyond tidiness: a window at -32000,-32000 is visible to page JavaScript
+    through screenX/screenY, and the stream tabs in that session were served
+    Cloudflare challenges while the plain GraphQL discovery call was fine.
+
+    Returns a description of what was found, for the log — the state the radar
+    actually starts in should not have to be guessed at.
+    """
+    page = ctx.pages[0] if ctx.pages else None
+    if page is None:
+        return "no page to inspect"
+    cdp = None
+    try:
+        cdp = ctx.new_cdp_session(page)
+        window_id = cdp.send("Browser.getWindowForTarget")["windowId"]
+        b = cdp.send("Browser.getWindowBounds", {"windowId": window_id})["bounds"]
+        found = (f"{b.get('width')}x{b.get('height')} at "
+                 f"{b.get('left')},{b.get('top')} ({b.get('windowState')})")
+        offscreen = (b.get("left", 0) < OFFSCREEN_LIMIT
+                     or b.get("top", 0) < OFFSCREEN_LIMIT)
+        if b.get("windowState") == "normal" and not offscreen:
+            return f"window {found}"
+        _set_window_state(cdp, window_id, "normal")
+        if offscreen:
+            cdp.send("Browser.setWindowBounds",
+                     {"windowId": window_id,
+                      "bounds": {"left": 40, "top": 40,
+                                 "width": b.get("width") or 1280,
+                                 "height": b.get("height") or 800}})
+        after = cdp.send("Browser.getWindowBounds",
+                         {"windowId": window_id})["bounds"]
+        return (f"window was {found} — moved on screen to "
+                f"{after.get('left')},{after.get('top')} "
+                f"({after.get('windowState')})")
+    except Exception as exc:
+        return f"could not read the window ({exc.__class__.__name__})"
+    finally:
+        if cdp is not None:
+            try:
+                cdp.detach()
+            except Exception:
+                pass
+
 
 def _set_window_state(cdp, window_id, state: str, timeout: float = 4.0) -> bool:
     """Ask for a window state and wait until it has actually taken effect.
@@ -1040,6 +1094,9 @@ def cmd_run(config: dict) -> None:
             )
         )
         poll_page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        # Always say where the window actually is, even when we did nothing to
+        # it: "it started minimised on its own" is otherwise unfalsifiable.
+        log(normalise_window(ctx))
         if config.get("minimize_browser", False):
             minimized, why = minimize_window(ctx)
             log(f"browser window minimized — {why}" if minimized else
