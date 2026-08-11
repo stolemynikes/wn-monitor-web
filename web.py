@@ -281,13 +281,19 @@ def ssh_server_state() -> dict:
             # capability is installed, so a silent failure at step 2 only
             # surfaces as a confusing error at step 3.
             "procedure": [
+                {"text": "Confirm this window really is elevated. It must "
+                         "print True — the install fails quietly-ish if not.",
+                 "command": "([Security.Principal.WindowsPrincipal]"
+                            "[Security.Principal.WindowsIdentity]::GetCurrent())"
+                            ".IsInRole([Security.Principal.WindowsBuiltInRole]"
+                            "::Administrator)"},
                 {"text": "See whether Windows offers it and what state it is "
                          "in. Expect State : NotPresent or Installed.",
                  "command": "Get-WindowsCapability -Online -Name OpenSSH.Server*"},
                 {"text": "If that said NotPresent, install it. Wait for it to "
-                         "finish and check it prints Online : True. If it "
-                         "errors, your Windows is blocking optional features "
-                         "— see the note below.",
+                         "finish and check it prints Online : True. An error "
+                         "0x800f0954 here means the download is blocked — skip "
+                         "to the winget line below instead.",
                  "command": "Add-WindowsCapability -Online -Name "
                             "OpenSSH.Server~~~~0.0.1.0"},
                 {"text": "Only now does the sshd service exist. Start it.",
@@ -299,12 +305,20 @@ def ssh_server_state() -> dict:
                  "command": "New-NetFirewallRule -Name sshd -DisplayName "
                             "'OpenSSH Server (sshd)' -Enabled True -Direction "
                             "Inbound -Protocol TCP -Action Allow -LocalPort 22"},
+                {"text": "ONLY if Add-WindowsCapability failed: this installs "
+                         "the same server as an ordinary package instead of a "
+                         "Windows feature, which sidesteps the block. Then go "
+                         "back to Start-Service above.",
+                 "command": "winget install --id Microsoft.OpenSSH.Beta "
+                            "--accept-package-agreements"},
             ],
-            "fallback": "If Add-WindowsCapability fails, the feature source is "
-                        "blocked (common on managed or Home machines). Try "
-                        "Settings → System → Optional features → Add an "
-                        "optional feature → OpenSSH Server, or install it with "
-                        "winget install Microsoft.OpenSSH.Beta.",
+            "fallback": "Add-WindowsCapability downloads from Windows Update as "
+                        "a Feature on Demand, so it fails on machines pointed "
+                        "at WSUS, on a metered connection, or where policy "
+                        "blocks optional features — usually error 0x800f0954. "
+                        "The winget line avoids that. Settings → System → "
+                        "Optional features → Add an optional feature → OpenSSH "
+                        "Server is the same thing with a GUI.",
             "where": "Settings → System → Optional features → OpenSSH Server",
             "check": "Get-Service sshd should say Running. Your Windows "
                      "sign-in name and password are what the shortcut asks "
