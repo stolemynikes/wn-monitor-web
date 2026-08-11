@@ -576,7 +576,10 @@ async function loadPhone(){
       then work normally.</p>
       <div class="cmd"><code>${esc(p.tailscale_serve)}</code>
         <button class="sm" aria-label="Copy command"
-          onclick='copyCmd(${JSON.stringify(p.tailscale_serve)},this)'>${ICON.copy}</button></div>`}`;
+          onclick='copyCmd(${JSON.stringify(p.tailscale_serve)},this)'>${ICON.copy}</button></div>
+      <p class="hint">First time it may answer <i>"Serve is not enabled on your
+        tailnet"</i> and print a link. Open the link, approve it — you are your
+        own tailnet admin, so it is one click — then run the command again.</p>`}`;
 }
 
 // The old copy just said "restart it with --host 0.0.0.0", which nobody can
