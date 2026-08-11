@@ -84,7 +84,8 @@ def build_browser_launch_kwargs(user_data_dir: str | Path, *, headless: bool = F
 
 
 PROBE_INSTALL = """() => {
-    window.__wnProbe = {ticks: 0, frames: 0, hidden: 0, stop: false};
+    window.__wnProbe = {ticks: 0, frames: 0, hidden: 0, stop: false,
+        geo: [screenX, screenY, outerWidth, outerHeight]};
     const p = window.__wnProbe;
     p._t = setInterval(() => p.ticks++, 250);
     const frame = () => { if (!p.stop) { p.frames++; requestAnimationFrame(frame); } };
@@ -96,7 +97,9 @@ PROBE_INSTALL = """() => {
 PROBE_READ = """() => {
     const p = window.__wnProbe || {};
     return {ticks: p.ticks|0, frames: p.frames|0, hidden: p.hidden|0,
-            visibility: document.visibilityState};
+            visibility: document.visibilityState,
+            geoBefore: p.geo || [],
+            geoAfter: [screenX, screenY, outerWidth, outerHeight]};
 }"""
 
 PROBE_CLEAR = """() => {
@@ -227,15 +230,27 @@ def minimize_window(ctx, verify_seconds: float = 4.0):
         expected = verify_seconds / PROBE_INTERVAL
         throttled = probe["ticks"] < expected * 0.5
         noticed = probe["visibility"] != "visible" or probe["hidden"] > 0
-        if noticed or throttled:
+        # Geometry matters as much as visibility, and this guard originally
+        # missed it. Windows minimises by parking the window at -32000,-32000,
+        # which page JavaScript reads straight off screenX/screenY — a browser
+        # at an impossible coordinate is a free bot signal, and stream tabs in
+        # exactly that state were served Cloudflare challenges.
+        before, after = probe.get("geoBefore") or [], probe.get("geoAfter") or []
+        moved = bool(before) and before != after
+        if noticed or throttled or moved:
             why = ("the page was told it is hidden" if noticed
+                   else f"the window reports itself at {after[0]},{after[1]} "
+                        f"instead of {before[0]},{before[1]}" if moved
                    else f"timers slowed to {probe['ticks']}/{int(expected)}")
             restored = _set_window_state(cdp, window_id, "normal")
             tail = ("window put back on screen" if restored else
                     "COULD NOT put the window back — restore it from the "
                     "Dock/taskbar yourself")
-            return False, (f"{why} while minimised, which would break the "
-                           f"heartbeats holding your giveaway entries — {tail}")
+            harm = ("which page scripts can read, and an impossible window "
+                    "position is exactly what bot checks look for" if moved else
+                    "which would break the heartbeats holding your giveaway "
+                    "entries")
+            return False, f"{why} while minimised, {harm} — {tail}"
         # Animation frames stopping is expected and harmless: detection runs on
         # the WebSocket and on timers, neither of which needs the compositor.
         extra = "" if probe["frames"] else "; animation frames paused (harmless)"

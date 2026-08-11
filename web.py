@@ -705,6 +705,20 @@ def open_panel(url: str, prefer_app_window: bool = True) -> None:
     webbrowser.open(url)
 
 
+def panel_already_running(port: int) -> bool:
+    """Is a panel of ours already answering on this port?
+
+    Checked on loopback whatever we are about to bind to: binding 0.0.0.0
+    collides with an existing 127.0.0.1 listener just the same.
+    """
+    import socket as _socket
+    try:
+        with _socket.create_connection(("127.0.0.1", port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--host", default=None,
@@ -730,6 +744,17 @@ def main() -> None:
               "the open internet.", flush=True)
 
     url = f"http://127.0.0.1:{args.port}"
+    # Double-clicking the launcher twice is the normal way to reach this, and
+    # it used to end in a WinError 10048 traceback. It isn't an error: the
+    # panel they wanted is already up, so just open it.
+    if panel_already_running(args.port):
+        print(f"\n  The panel is already running:  {url}", flush=True)
+        print("  Opening it. To restart it instead, close the other window "
+              "first.\n", flush=True)
+        if not args.no_browser:
+            open_panel(url, not args.tab)
+        return
+
     print(f"\n  Whatnot Radar panel:  {url}", flush=True)
     print("  Leave this window open. Press Ctrl+C to shut the panel down.\n", flush=True)
     if not args.no_browser:
@@ -742,12 +767,24 @@ def main() -> None:
     serve(args.host, args.port)
 
 
+def _bind_failed(host: str, port: int) -> None:
+    """uvicorn reports a failed bind by calling sys.exit inside its own task,
+    which surfaces as SystemExit plus an unhandled-task traceback. Neither is
+    something to show someone whose only mistake was starting it twice."""
+    print(f"\n  Could not listen on {host}:{port} — something else already "
+          "has that port.\n  If it is another copy of this panel, close its "
+          "window and try again.\n", flush=True)
+
+
 def serve(host: str, port: int) -> None:
     import uvicorn
     server = uvicorn.Server(uvicorn.Config(app, host=host, port=port,
                                            log_level="warning"))
     if platform.system() != "Windows":
-        server.run()
+        try:
+            server.run()
+        except SystemExit:
+            return _bind_failed(host, port)
         _farewell()
         return
 
@@ -768,12 +805,14 @@ def serve(host: str, port: int) -> None:
         task = asyncio.ensure_future(server.serve())
         while not task.done():
             await asyncio.sleep(0.2)
-        await task
+        await task            # re-raise inside the loop so it isn't orphaned
 
     try:
         asyncio.run(run())
     except KeyboardInterrupt:
         pass
+    except SystemExit:        # uvicorn's way of saying the bind failed
+        return _bind_failed(host, port)
     _farewell()
 
 
