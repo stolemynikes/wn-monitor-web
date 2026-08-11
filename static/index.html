@@ -536,7 +536,7 @@ async function loadPhone(){
         <button class="sm" aria-label="Open the Tailscale download page"
           onclick="window.open('https://tailscale.com/download','_blank','noopener')">open</button>
         <button class="sm" aria-label="Copy the Tailscale download address"
-          onclick='copyCmd("https://tailscale.com/download")'>${ICON.copy}</button></div>
+          onclick='copyCmd("https://tailscale.com/download",this)'>${ICON.copy}</button></div>
       <p class="hint"><b>Don't</b> put this panel on the open internet instead.
       Anyone who finds it could start your radar, read your log and change your
       settings.</p>`;
@@ -554,7 +554,7 @@ async function loadPhone(){
         <p class="hint" style="margin-top:0">Scan with your phone camera, or open:</p>
         <div class="cmd"><code>${esc(p.url)}</code>
           <button class="sm" aria-label="Copy address"
-            onclick='copyCmd(${JSON.stringify(p.url)})'>${ICON.copy}</button></div>
+            onclick='copyCmd(${JSON.stringify(p.url)},this)'>${ICON.copy}</button></div>
         ${p.password?`<p class="saved" style="margin-top:12px">password
           <b style="letter-spacing:.06em">${esc(p.password)}</b></p>
           <div class="row" style="margin-top:8px">
@@ -566,7 +566,17 @@ async function loadPhone(){
     ${phoneAccessBlock(p)}
     <p class="hint">Your phone will ask for the password once and remember it.
       Only your own Tailscale devices can reach this — it is not on the public
-      internet, and it shouldn't be.</p>`;
+      internet, and it shouldn't be.</p>
+    ${location.protocol==='https:'?'':`<p class="hint" style="margin-top:14px">
+      <b>Copy buttons not working on your phone?</b> They can't: browsers only
+      allow copying over <code>https</code>, and this is plain
+      <code>http</code>. Tapping the text selects it so you can use your
+      phone's own Copy. To fix it properly, run this once on the computer and
+      then use the <code>https://…</code> address it prints — the copy buttons
+      then work normally.</p>
+      <div class="cmd"><code>tailscale serve --bg ${p.port}</code>
+        <button class="sm" aria-label="Copy command"
+          onclick='copyCmd(${JSON.stringify("tailscale serve --bg "+p.port)},this)'>${ICON.copy}</button></div>`}`;
 }
 
 // The old copy just said "restart it with --host 0.0.0.0", which nobody can
@@ -614,7 +624,7 @@ function field(label, value, note){
     </div>
     <div class="cmd"><code>${esc(value)}</code>
       <button class="sm" aria-label="Copy ${esc(label)}"
-        onclick='copyCmd(${JSON.stringify(value)})'>${ICON.copy}</button></div>
+        onclick='copyCmd(${JSON.stringify(value)},this)'>${ICON.copy}</button></div>
   </div>`;
 }
 
@@ -632,7 +642,7 @@ function sshServerBlock(srv){
         <span class="hint" style="margin:0">${esc(s.text)}</span>
         ${s.command?`<div class="cmd"><code>${esc(s.command)}</code>
           <button class="sm" aria-label="Copy this command"
-            onclick='copyCmd(${JSON.stringify(s.command)})'>${ICON.copy}</button></div>`:''}
+            onclick='copyCmd(${JSON.stringify(s.command)},this)'>${ICON.copy}</button></div>`:''}
       </li>`).join('')}
     </ol>
     ${srv.fallback?`<p class="hint" style="margin:10px 0 0">${esc(srv.fallback)}</p>`:''}`;
@@ -705,25 +715,36 @@ async function loadSsh(){
 // the API is simply absent, and `navigator.clipboard?.writeText(t).then(...)`
 // short-circuited to undefined: the buttons did nothing, silently. Hence the
 // execCommand fallback, and hence the text being selectable by hand as well.
-function copyCmd(t){
+function copyCmd(t, btn){
   if(window.isSecureContext&&navigator.clipboard){
-    navigator.clipboard.writeText(t).then(()=>toast('copied'),()=>legacyCopy(t));
-  }else{
-    legacyCopy(t);
+    navigator.clipboard.writeText(t).then(()=>toast('copied'),()=>selectInstead(btn));
+    return;
   }
+  // Outside a secure context iOS is the problem case: execCommand('copy') can
+  // return true having copied nothing, so the panel says "copied" and the
+  // paste is empty. Reported from an iPhone over Tailscale http. Don't claim
+  // success we can't verify — select the real text instead, which makes iOS
+  // show its own Copy button, and that always works.
+  selectInstead(btn);
 }
-function legacyCopy(t){
-  const el=document.createElement('textarea');
-  el.value=t; el.contentEditable='true';
-  el.style.cssText='position:fixed;top:0;left:0;width:1px;height:1px;opacity:0';
-  document.body.appendChild(el);
-  const range=document.createRange(); range.selectNodeContents(el);
-  const sel=window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
-  el.setSelectionRange(0,t.length);              // iOS needs this as well
-  let ok=false; try{ ok=document.execCommand('copy'); }catch{}
-  sel.removeAllRanges(); document.body.removeChild(el);
-  toast(ok?'copied':'could not copy — press and hold the text to select it',!ok);
+function selectNode(el){
+  try{
+    const r=document.createRange(); r.selectNodeContents(el);
+    const s=window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    return true;
+  }catch{ return false; }
 }
+function selectInstead(btn){
+  const code=btn&&btn.closest('.cmd')&&btn.closest('.cmd').querySelector('code');
+  if(code&&selectNode(code)) toast('selected — now tap Copy');
+  else toast('press and hold the text to copy it',true);
+}
+// Tapping the text itself selects all of it, so the system Copy bubble appears
+// without having to drag selection handles over a long command.
+document.addEventListener('click',e=>{
+  const c=e.target.closest&&e.target.closest('.cmd code');
+  if(c) selectNode(c);
+});
 
 function addSeller(){const v=$('#blockName').value.trim(); if(!v)return;
   post('/api/seller',{seller:v,list_name:'blacklist'}).then(()=>$('#blockName').value='');}
