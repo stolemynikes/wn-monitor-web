@@ -308,9 +308,15 @@ def ssh_server_state() -> dict:
                 {"text": "ONLY if Add-WindowsCapability failed: this installs "
                          "the same server as an ordinary package instead of a "
                          "Windows feature, which sidesteps the block. Then go "
-                         "back to Start-Service above.",
-                 "command": "winget install --id Microsoft.OpenSSH.Beta "
-                            "--accept-package-agreements"},
+                         "back to Start-Service above. (The id really is "
+                         "Preview — Microsoft renamed it from Beta.)",
+                 "command": "winget install --id Microsoft.OpenSSH.Preview "
+                            "--accept-package-agreements "
+                            "--accept-source-agreements"},
+                {"text": "If winget says \"No package found\", its package "
+                         "source is missing rather than the package. Reset it, "
+                         "then retry the line above.",
+                 "command": "winget source reset --force"},
             ],
             "fallback": "Add-WindowsCapability downloads from Windows Update as "
                         "a Feature on Demand, so it fails on machines pointed "
@@ -318,7 +324,11 @@ def ssh_server_state() -> dict:
                         "blocks optional features — usually error 0x800f0954. "
                         "The winget line avoids that. Settings → System → "
                         "Optional features → Add an optional feature → OpenSSH "
-                        "Server is the same thing with a GUI.",
+                        "Server is the same thing with a GUI. If none of them "
+                        "work, OpenSSH-Win64.zip from "
+                        "github.com/PowerShell/Win32-OpenSSH/releases installs "
+                        "by hand: unzip to C:\\Program Files\\OpenSSH and run "
+                        "install-sshd.ps1 from there in the same admin window.",
             "where": "Settings → System → Optional features → OpenSSH Server",
             "check": "Get-Service sshd should say Running. Your Windows "
                      "sign-in name and password are what the shortcut asks "
