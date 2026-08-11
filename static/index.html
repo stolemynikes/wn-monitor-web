@@ -574,9 +574,9 @@ async function loadPhone(){
       phone's own Copy. To fix it properly, run this once on the computer and
       then use the <code>https://…</code> address it prints — the copy buttons
       then work normally.</p>
-      <div class="cmd"><code>tailscale serve --bg ${p.port}</code>
+      <div class="cmd"><code>${esc(p.tailscale_serve)}</code>
         <button class="sm" aria-label="Copy command"
-          onclick='copyCmd(${JSON.stringify("tailscale serve --bg "+p.port)},this)'>${ICON.copy}</button></div>`}`;
+          onclick='copyCmd(${JSON.stringify(p.tailscale_serve)},this)'>${ICON.copy}</button></div>`}`;
 }
 
 // The old copy just said "restart it with --host 0.0.0.0", which nobody can

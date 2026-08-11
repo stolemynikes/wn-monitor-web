@@ -592,6 +592,16 @@ def _tailnet_host() -> str | None:
     return tailnet_state()["host"]
 
 
+def _tailscale_serve_command(port: int) -> str:
+    """The `tailscale serve` line with the binary's real location filled in."""
+    exe = find_tailscale() or "tailscale"
+    if " " not in exe:
+        return f"{exe} serve --bg {port}"
+    # A quoted path is only a string in PowerShell until you prefix it with &.
+    prefix = "& " if platform.system() == "Windows" else ""
+    return f'{prefix}"{exe}" serve --bg {port}'
+
+
 @app.get("/api/phone-info")
 def api_phone_info(request: Request):
     """Everything needed to open the panel on a phone, resolved for THIS
@@ -611,6 +621,10 @@ def api_phone_info(request: Request):
         "bound_all": bound_all,
         # saved but not in effect yet: the panel has to be started again
         "restart_pending": wants_all and not bound_all,
+        # Resolved, not the bare word: the Windows installer does not put
+        # tailscale.exe on PATH, so "tailscale serve ..." just errors. In
+        # PowerShell a quoted path also needs & in front to be executed.
+        "tailscale_serve": _tailscale_serve_command(port),
         "launcher": "start-panel.bat" if platform.system() == "Windows"
                     else "start-panel.command",
         "manual_command": f'"{sys.executable}" web.py --host 0.0.0.0',
