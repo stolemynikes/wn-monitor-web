@@ -53,8 +53,8 @@ SERVE_HOST = "127.0.0.1"   # set from --host at startup
 EDITABLE = {
     "my_username", "notifier", "bark_key", "ntfy_topic", "ntfy_server",
     "seller_poll_seconds", "giveaway_poll_seconds", "max_concurrent_streams",
-    "pinned_extra_tabs", "watch_giveaways", "headless", "sellers",
-    "blacklist", "blacklist_temp", "bought_sellers", "foreign_sellers",
+    "pinned_extra_tabs", "watch_giveaways", "headless", "minimize_browser",
+    "sellers", "blacklist", "blacklist_temp", "bought_sellers", "foreign_sellers",
     "discovery", "panel_password", "panel_host",
 }
 
@@ -272,24 +272,41 @@ def ssh_server_state() -> dict:
     if system == "Windows":
         how = {
             "summary": "Windows does not install an SSH server by default.",
-            "steps": ["Open PowerShell as Administrator (right-click → Run as "
-                      "administrator), then run these three lines."],
+            "steps": ["Open PowerShell as Administrator (right-click the Start "
+                      "button → Terminal (Admin)), then run these three lines."],
             "commands": [
                 "Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0",
                 "Start-Service sshd",
                 "Set-Service -Name sshd -StartupType Automatic",
             ],
+            "where": "Settings → System → Optional features → OpenSSH Server",
+            "check": "In PowerShell run  Get-Service sshd  — Status should say "
+                     "Running. Your Windows sign-in name and password are what "
+                     "the shortcut asks for.",
         }
     elif system == "Darwin":
-        how = {"summary": "macOS has one built in, it just needs switching on.",
-               "steps": ["System Settings → General → Sharing → turn on "
-                         "Remote Login."],
-               "commands": []}
+        how = {
+            "summary": "macOS has an SSH server built in — it only needs "
+                       "switching on.",
+            "steps": ["System Settings → General → Sharing → turn on "
+                      "Remote Login.",
+                      "Click the ⓘ beside it and make sure your own user is "
+                      "in the allowed list."],
+            "commands": [],
+            "where": "System Settings → General → Sharing → Remote Login",
+            "check": "System Settings → General → Sharing → Remote Login shows "
+                     "a green dot. Your Mac login name and password are what "
+                     "the shortcut asks for.",
+        }
     else:
-        how = {"summary": "Install and enable OpenSSH.",
-               "steps": ["On Debian/Ubuntu:"],
-               "commands": ["sudo apt install openssh-server",
-                            "sudo systemctl enable --now ssh"]}
+        how = {
+            "summary": "Install and enable OpenSSH.",
+            "steps": ["On Debian/Ubuntu:"],
+            "commands": ["sudo apt install openssh-server",
+                         "sudo systemctl enable --now ssh"],
+            "where": "the openssh-server package",
+            "check": "systemctl status ssh  — it should say active (running).",
+        }
     return {"listening": listening, **how}
 
 

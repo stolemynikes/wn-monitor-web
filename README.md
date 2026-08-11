@@ -120,9 +120,18 @@ Now leave it alone and wait for your phone to buzz.
 - **Tuning** — how many streams to watch at once. **Leave this alone unless you
   have a reason.** See "Going easy" below.
 
-Some browser windows will sit open on your computer while it runs. That's the
-tool doing its job — don't close them; just move them to another desktop or
-minimise them. Closing them stops the radar.
+A browser window sits open on your computer while it runs. That's the tool
+doing its job — **don't close it**, that stops the radar.
+
+If it's in your way, tick **keep the browser window minimised** under
+*intensity*. It then lives in the Dock/taskbar instead of on your desktop.
+
+It checks itself rather than trusting that this is safe. On start it minimises,
+watches for a few seconds to confirm Whatnot still sees the page as visible and
+its timers running at full speed, and puts the window back on screen if not.
+The log line tells you which happened. So the worst case is a window you can
+see, never a radar that quietly stopped holding your giveaway entries.
+Minimising it by hand is fine too.
 
 ### What the notifications mean
 

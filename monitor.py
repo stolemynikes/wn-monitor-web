@@ -83,6 +83,119 @@ def build_browser_launch_kwargs(user_data_dir: str | Path, *, headless: bool = F
     return kwargs
 
 
+PROBE_INSTALL = """() => {
+    window.__wnProbe = {ticks: 0, frames: 0, hidden: 0, stop: false};
+    const p = window.__wnProbe;
+    p._t = setInterval(() => p.ticks++, 250);
+    const frame = () => { if (!p.stop) { p.frames++; requestAnimationFrame(frame); } };
+    requestAnimationFrame(frame);
+    p._v = () => p.hidden++;
+    document.addEventListener('visibilitychange', p._v);
+}"""
+
+PROBE_READ = """() => {
+    const p = window.__wnProbe || {};
+    return {ticks: p.ticks|0, frames: p.frames|0, hidden: p.hidden|0,
+            visibility: document.visibilityState};
+}"""
+
+PROBE_CLEAR = """() => {
+    const p = window.__wnProbe;
+    if (!p) return;
+    p.stop = true; clearInterval(p._t);
+    document.removeEventListener('visibilitychange', p._v);
+    delete window.__wnProbe;
+}"""
+
+PROBE_INTERVAL = 0.25   # seconds between probe ticks
+
+
+def _set_window_state(cdp, window_id, state: str, timeout: float = 4.0) -> bool:
+    """Ask for a window state and wait until it has actually taken effect.
+
+    setWindowBounds returns before the window manager has finished — macOS
+    animates de-miniaturisation, and an immediate read still says "minimized".
+    Caught by testing the failure path: a restore we assumed had worked left
+    the window hidden after we had just decided hiding it was unsafe.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            cdp.send("Browser.setWindowBounds",
+                     {"windowId": window_id, "bounds": {"windowState": state}})
+            current = cdp.send("Browser.getWindowBounds",
+                               {"windowId": window_id})["bounds"]["windowState"]
+        except Exception:
+            return False
+        if current == state:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.25)
+
+
+def minimize_window(ctx, verify_seconds: float = 4.0):
+    """Minimise the browser, but only keep it minimised if the page can't tell.
+
+    Measured on macOS 2026-08-11: while minimised, document.visibilityState
+    stays "visible", no visibilitychange fires, timers keep full rate, and
+    every window/screen dimension is unchanged.
+
+    That was initially credited to Playwright's
+    --disable-backgrounding-occluded-windows and friends, but removing all
+    three flags changed nothing — so it is macOS behaviour, not a flag we can
+    count on carrying to Windows. There, Chromium can reach minimisation
+    through widget visibility rather than occlusion, and no test here can say
+    what happens. If the page does go hidden, Whatnot's channel heartbeats get
+    throttled and the presence holding a giveaway entry open dies silently,
+    which is the worst failure this tool has.
+
+    So it measures rather than assumes, on whatever platform it is running:
+    minimise, watch for a few seconds, and put the window back if anything
+    observable changed. Returns (minimised, reason).
+    """
+    page = ctx.pages[0] if ctx.pages else None
+    if page is None:
+        return False, "no page to attach to"
+    cdp = None
+    try:
+        cdp = ctx.new_cdp_session(page)
+        window_id = cdp.send("Browser.getWindowForTarget")["windowId"]
+        page.evaluate(PROBE_INSTALL)
+        if not _set_window_state(cdp, window_id, "minimized"):
+            page.evaluate(PROBE_CLEAR)
+            return False, "the window manager would not minimise it"
+
+        time.sleep(verify_seconds)
+        probe = page.evaluate(PROBE_READ)
+        page.evaluate(PROBE_CLEAR)
+
+        expected = verify_seconds / PROBE_INTERVAL
+        throttled = probe["ticks"] < expected * 0.5
+        noticed = probe["visibility"] != "visible" or probe["hidden"] > 0
+        if noticed or throttled:
+            why = ("the page was told it is hidden" if noticed
+                   else f"timers slowed to {probe['ticks']}/{int(expected)}")
+            restored = _set_window_state(cdp, window_id, "normal")
+            tail = ("window put back on screen" if restored else
+                    "COULD NOT put the window back — restore it from the "
+                    "Dock/taskbar yourself")
+            return False, (f"{why} while minimised, which would break the "
+                           f"heartbeats holding your giveaway entries — {tail}")
+        # Animation frames stopping is expected and harmless: detection runs on
+        # the WebSocket and on timers, neither of which needs the compositor.
+        extra = "" if probe["frames"] else "; animation frames paused (harmless)"
+        return True, f"verified the page cannot tell{extra}"
+    except Exception as exc:
+        return False, f"{exc.__class__.__name__} while minimising"
+    finally:
+        if cdp is not None:
+            try:
+                cdp.detach()
+            except Exception:
+                pass
+
+
 def backup_profile(source_dir: Path = PROFILE_DIR, backup_dir: Path = PROFILE_BACKUP_DIR) -> bool:
     """Copy the current profile to a last-known-good backup."""
     if not source_dir.exists():
@@ -927,6 +1040,10 @@ def cmd_run(config: dict) -> None:
             )
         )
         poll_page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        if config.get("minimize_browser", False):
+            minimized, why = minimize_window(ctx)
+            log(f"browser window minimized — {why}" if minimized else
+                f"browser window left on screen — {why}")
         watchers = {}          # stream_id -> StreamWatcher
         seller_live = {}       # stream_id -> (seller, url, title), from seller polls
         discovered = {}        # stream_id -> (seller, url, title), from discovery

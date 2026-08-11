@@ -313,6 +313,18 @@
       </div>
       <p class="hint">Higher is greedier and risks getting blocked by Whatnot.
         3 streams is the safe default.</p>
+      <label class="row" style="gap:8px; margin-top:14px; font-size:13px;
+             align-items:flex-start; cursor:pointer">
+        <input type="checkbox" id="minBrowser"
+               style="min-height:auto; width:16px; height:16px; margin-top:2px">
+        <span>keep the browser window minimised
+          <span class="hint" style="display:block; margin:2px 0 0">Tucks it into
+          the Dock/taskbar instead of sitting on your desktop. On start it
+          minimises, checks for a few seconds that Whatnot still sees the page
+          as visible and unthrottled, and puts the window back if not — so it
+          can never quietly cost you giveaway entries. The log says which
+          happened.</span></span>
+      </label>
       <div class="row" style="margin-top:12px"><button class="sm" onclick="saveTuning()">save</button></div>
     </section>
 
@@ -446,6 +458,7 @@ async function loadConfig(){
                                 :`${ICON.todo} nothing saved yet`;
   $('#maxTabs').value=c.max_concurrent_streams??3;
   $('#sellerPoll').value=c.seller_poll_seconds??90;
+  $('#minBrowser').checked=!!c.minimize_browser;
 
   const bl=c.blacklist||[]; $('#blCount').textContent=bl.length;
   $('#blacklist').innerHTML=bl.length?bl.map(n=>
@@ -608,15 +621,28 @@ function field(label, value, note){
 // "could not connect to the SSH server" is the same message whether the
 // address is wrong or no server was ever installed — so say which it is.
 function sshServerBlock(srv){
-  if(!srv||srv.listening) return '';
+  if(!srv) return '';
+  const how=`
+    ${(srv.steps||[]).map(t=>`<p class="hint" style="margin:8px 0 0">${esc(t)}</p>`).join('')}
+    ${(srv.commands||[]).map(c=>`<div class="cmd"><code>${esc(c)}</code>
+      <button class="sm" aria-label="Copy command"
+        onclick='copyCmd(${JSON.stringify(c)})'>${ICON.copy}</button></div>`).join('')}`;
+  // Shown in both states: when it works you want to confirm you're looking at
+  // the right switch, and when it doesn't you need the switch itself.
+  if(srv.listening) return `<div class="alert ok">${ICON.ok}<div>
+    <b>SSH server is running here</b> — something is listening on port 22, so
+    the shortcut should be able to connect.
+    <details style="margin-top:6px"><summary class="hint"
+      style="cursor:pointer">where this setting lives, and what to sign in with</summary>
+      <p class="hint" style="margin:8px 0 0">${esc(srv.check||'')}</p>
+      <p class="hint" style="margin:6px 0 0">Setting: ${esc(srv.where||'')}</p>
+    </details></div></div>`;
   return `<div class="alert bad">${ICON.todo}<div>
     <b>No SSH server is running on this computer.</b> Until you fix this, any
     shortcut will fail with <i>"could not connect to the SSH server"</i> no
     matter what you put in the fields. ${esc(srv.summary||'')}
-    ${(srv.steps||[]).map(t=>`<p class="hint" style="margin:8px 0 0">${esc(t)}</p>`).join('')}
-    ${(srv.commands||[]).map(c=>`<div class="cmd"><code>${esc(c)}</code>
-      <button class="sm" aria-label="Copy command"
-        onclick='copyCmd(${JSON.stringify(c)})'>${ICON.copy}</button></div>`).join('')}
+    ${how}
+    <p class="hint" style="margin:8px 0 0">Check it worked: ${esc(srv.check||'')}</p>
   </div></div>`;
 }
 
@@ -696,7 +722,8 @@ function saveNotifier(){
   window._restartNeeded=true; post('/api/config',patch).then(()=>$('#notifKey').value='');}
 function saveTuning(){window._restartNeeded=true;
   post('/api/config',{max_concurrent_streams:+$('#maxTabs').value,
-                      seller_poll_seconds:+$('#sellerPoll').value});}
+                      seller_poll_seconds:+$('#sellerPoll').value,
+                      minimize_browser:$('#minBrowser').checked});}
 function saveSource(){
   const countries=[...selectedCountries];
   if(!countries.length)return toast('pick at least one country',true);
