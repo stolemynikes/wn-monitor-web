@@ -272,40 +272,78 @@ def ssh_server_state() -> dict:
     if system == "Windows":
         how = {
             "summary": "Windows does not install an SSH server by default.",
-            "steps": ["Open PowerShell as Administrator (right-click the Start "
-                      "button → Terminal (Admin)), then run these three lines."],
-            "commands": [
-                "Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0",
-                "Start-Service sshd",
-                "Set-Service -Name sshd -StartupType Automatic",
+            "intro": "Open PowerShell as Administrator (right-click the Start "
+                     "button → Terminal (Admin)) and work down in order. Each "
+                     "step needs the one above it to have worked.",
+            # Deliberately ordered and individually explained. Handing over
+            # three commands at once produced "Cannot find any service with
+            # service name 'sshd'": the service does not exist until the
+            # capability is installed, so a silent failure at step 2 only
+            # surfaces as a confusing error at step 3.
+            "procedure": [
+                {"text": "See whether Windows offers it and what state it is "
+                         "in. Expect State : NotPresent or Installed.",
+                 "command": "Get-WindowsCapability -Online -Name OpenSSH.Server*"},
+                {"text": "If that said NotPresent, install it. Wait for it to "
+                         "finish and check it prints Online : True. If it "
+                         "errors, your Windows is blocking optional features "
+                         "— see the note below.",
+                 "command": "Add-WindowsCapability -Online -Name "
+                            "OpenSSH.Server~~~~0.0.1.0"},
+                {"text": "Only now does the sshd service exist. Start it.",
+                 "command": "Start-Service sshd"},
+                {"text": "Make it come back by itself after a reboot.",
+                 "command": "Set-Service -Name sshd -StartupType Automatic"},
+                {"text": "Let it through the firewall (harmless if the "
+                         "installer already added this).",
+                 "command": "New-NetFirewallRule -Name sshd -DisplayName "
+                            "'OpenSSH Server (sshd)' -Enabled True -Direction "
+                            "Inbound -Protocol TCP -Action Allow -LocalPort 22"},
             ],
+            "fallback": "If Add-WindowsCapability fails, the feature source is "
+                        "blocked (common on managed or Home machines). Try "
+                        "Settings → System → Optional features → Add an "
+                        "optional feature → OpenSSH Server, or install it with "
+                        "winget install Microsoft.OpenSSH.Beta.",
             "where": "Settings → System → Optional features → OpenSSH Server",
-            "check": "In PowerShell run  Get-Service sshd  — Status should say "
-                     "Running. Your Windows sign-in name and password are what "
-                     "the shortcut asks for.",
+            "check": "Get-Service sshd should say Running. Your Windows "
+                     "sign-in name and password are what the shortcut asks "
+                     "for — a Microsoft account usually means your email "
+                     "address is NOT the username; use the name shown by "
+                     "whoami.",
         }
     elif system == "Darwin":
         how = {
             "summary": "macOS has an SSH server built in — it only needs "
                        "switching on.",
-            "steps": ["System Settings → General → Sharing → turn on "
-                      "Remote Login.",
-                      "Click the ⓘ beside it and make sure your own user is "
-                      "in the allowed list."],
-            "commands": [],
+            "intro": "No installing required.",
+            "procedure": [
+                {"text": "System Settings → General → Sharing → turn on "
+                         "Remote Login.", "command": ""},
+                {"text": "Click the ⓘ beside it and make sure your own user "
+                         "is in the allowed list.", "command": ""},
+                {"text": "Or do the same from a terminal, if you prefer.",
+                 "command": "sudo systemsetup -setremotelogin on"},
+            ],
+            "fallback": "",
             "where": "System Settings → General → Sharing → Remote Login",
-            "check": "System Settings → General → Sharing → Remote Login shows "
-                     "a green dot. Your Mac login name and password are what "
-                     "the shortcut asks for.",
+            "check": "Remote Login shows a green dot. Your Mac login name "
+                     "(the one from whoami) and password are what the "
+                     "shortcut asks for.",
         }
     else:
         how = {
             "summary": "Install and enable OpenSSH.",
-            "steps": ["On Debian/Ubuntu:"],
-            "commands": ["sudo apt install openssh-server",
-                         "sudo systemctl enable --now ssh"],
+            "intro": "On Debian/Ubuntu:",
+            "procedure": [
+                {"text": "Install the server.",
+                 "command": "sudo apt install openssh-server"},
+                {"text": "Start it, and have it start at boot.",
+                 "command": "sudo systemctl enable --now ssh"},
+            ],
+            "fallback": "",
             "where": "the openssh-server package",
-            "check": "systemctl status ssh  — it should say active (running).",
+            "check": "systemctl status ssh should say active (running).",
         }
     return {"listening": listening, **how}
 

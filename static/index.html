@@ -622,11 +622,20 @@ function field(label, value, note){
 // address is wrong or no server was ever installed — so say which it is.
 function sshServerBlock(srv){
   if(!srv) return '';
+  // Numbered, each command sitting under the step that explains it. A bare
+  // list of commands invites running them all at once, and step 3 then fails
+  // with "cannot find service sshd" because step 2 quietly didn't work.
   const how=`
-    ${(srv.steps||[]).map(t=>`<p class="hint" style="margin:8px 0 0">${esc(t)}</p>`).join('')}
-    ${(srv.commands||[]).map(c=>`<div class="cmd"><code>${esc(c)}</code>
-      <button class="sm" aria-label="Copy command"
-        onclick='copyCmd(${JSON.stringify(c)})'>${ICON.copy}</button></div>`).join('')}`;
+    ${srv.intro?`<p class="hint" style="margin:8px 0 0">${esc(srv.intro)}</p>`:''}
+    <ol style="margin:8px 0 0; padding-left:20px">
+      ${(srv.procedure||[]).map(s=>`<li style="margin-top:8px">
+        <span class="hint" style="margin:0">${esc(s.text)}</span>
+        ${s.command?`<div class="cmd"><code>${esc(s.command)}</code>
+          <button class="sm" aria-label="Copy this command"
+            onclick='copyCmd(${JSON.stringify(s.command)})'>${ICON.copy}</button></div>`:''}
+      </li>`).join('')}
+    </ol>
+    ${srv.fallback?`<p class="hint" style="margin:10px 0 0">${esc(srv.fallback)}</p>`:''}`;
   // Shown in both states: when it works you want to confirm you're looking at
   // the right switch, and when it doesn't you need the switch itself.
   if(srv.listening) return `<div class="alert ok">${ICON.ok}<div>
