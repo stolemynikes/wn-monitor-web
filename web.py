@@ -641,6 +641,32 @@ def http_error(_request, exc: HTTPException):
     return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
 
 
+def open_panel(url: str, prefer_app_window: bool = True) -> None:
+    """Open the panel in a window of its own, away from the radar's tabs.
+
+    webbrowser.open asks the OS to hand the URL to the running browser. On
+    macOS that is an AppleEvent addressed to the *application*, and the radar's
+    Chrome — same app bundle, different profile — answers it, so the panel
+    opens as a tab in among the stream tabs.
+
+    Launching the Chrome binary ourselves avoids that: Chrome's single-instance
+    routing is keyed on user-data-dir, so with none given this reaches the
+    user's ordinary profile rather than the radar's. --app then gives a
+    standalone window with no tab strip for anything to be adopted into.
+    """
+    if prefer_app_window:
+        from browser_task import find_google_chrome
+        if (chrome := find_google_chrome()):
+            try:
+                subprocess.Popen([chrome, f"--app={url}"],
+                                 stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+                return
+            except OSError:
+                pass          # fall through to the ordinary browser
+    webbrowser.open(url)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--host", default=None,
@@ -648,6 +674,9 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-browser", action="store_true",
                     help="don't open the panel automatically")
+    ap.add_argument("--tab", action="store_true",
+                    help="open the panel as an ordinary browser tab instead of "
+                         "its own window")
     args = ap.parse_args()
     # Nobody types a command to start this — they double-click the launcher,
     # which passes no arguments. So the phone-access choice has to live in the
@@ -668,8 +697,9 @@ def main() -> None:
     if not args.no_browser:
         # Opening it for them: "nothing happened" is otherwise the most common
         # first-run confusion — the server starts but never shows anything.
-        threading.Thread(target=lambda: (time.sleep(1.5), webbrowser.open(url)),
-                         daemon=True).start()
+        threading.Thread(
+            target=lambda: (time.sleep(1.5), open_panel(url, not args.tab)),
+            daemon=True).start()
 
     serve(args.host, args.port)
 

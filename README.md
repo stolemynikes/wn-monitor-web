@@ -274,6 +274,9 @@ bot protection. An old laptop or a Raspberry Pi at home works much better.
 - `python control.py start|stop|restart|status` — run it without the panel.
 - `python monitor.py run` — foreground, logs to stdout.
 - `python monitor.py test` — send a test notification.
+- The panel opens in its own Chrome app window so it can't end up as a tab
+  among the radar's streams. `--tab` for an ordinary tab, `--no-browser` for
+  none.
 - Config lives in `config.json`; the panel only writes an allowlist of fields.
 - The panel binds `config.panel_host` (default `127.0.0.1`) on port 8765. The
   **allow my phone** button writes that field; `--host` overrides it for one
