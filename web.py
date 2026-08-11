@@ -423,8 +423,17 @@ def api_ssh_info():
             return f'"{script}"'
         return shlex.quote(script)
 
+    # OpenSSH refuses a username beginning with a dash outright ("remote
+    # username contains invalid characters"), and in the user@host form the
+    # client parses it as a flag before that. No command we could print would
+    # work, so say so rather than handing over something impossible.
+    user_warning = ("Your account name (%s) starts with a dash, and OpenSSH "
+                    "rejects those — no ssh command can use it. You would need "
+                    "to log in as a different local user." % user
+                    if user.startswith("-") else "")
     return {
-        "user": user, "hosts": hosts, "host": hosts[0], "port": 22,
+        "user": user, "user_warning": user_warning,
+        "hosts": hosts, "host": hosts[0], "port": 22,
         # SSH does not need the QR code — that is only a shortcut for opening
         # the panel in a phone browser. Say which address these use, because a
         # local name silently fails the moment you leave the house.

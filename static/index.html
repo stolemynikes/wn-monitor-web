@@ -659,7 +659,9 @@ function renderSsh(){
   const s=sshInfo; if(!s) return;
   $('#tabShortcut').setAttribute('aria-pressed',String(sshMode==='shortcut'));
   $('#tabTerminal').setAttribute('aria-pressed',String(sshMode==='terminal'));
-  const warn=sshServerBlock(s.ssh_server);
+  let warn=sshServerBlock(s.ssh_server);
+  if(s.user_warning)warn+=`<div class="alert bad">${ICON.todo}
+    <div>${esc(s.user_warning)}</div></div>`;
   if(sshMode==='terminal'){
     $('#sshCmds').innerHTML=warn+Object.entries(s.commands)
       .map(([k,v])=>field(k,v,SSH_WHAT[k])).join('');
