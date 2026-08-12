@@ -52,12 +52,23 @@ def read_pid():
     return None
 
 
-def foreign_instances():
+_FOREIGN_CACHE = {"at": -1e9, "value": []}
+FOREIGN_CACHE_SECONDS = 30
+
+
+def foreign_instances(max_age: float = FOREIGN_CACHE_SECONDS):
     """Other monitor.py processes outside this project.
 
     Two radars driving separate browsers from one IP doubles the traffic
     signature — which is what tripped Cloudflare before. Refuse to add to it.
+
+    Cached: this walks every process on the machine (~10ms) and the panel asks
+    for status every 2.5 seconds, all day. It also reads other users' command
+    lines, which is where the macOS PermissionError came from. Nothing here
+    changes second to second.
     """
+    if time.time() - _FOREIGN_CACHE["at"] < max_age:
+        return _FOREIGN_CACHE["value"]
     found = []
     for proc in psutil.process_iter(["pid", "cmdline"]):
         # Broad catch on purpose: reading another user's process can raise a
@@ -80,13 +91,15 @@ def foreign_instances():
             is_ours = False
         if not is_ours:
             found.append((proc.info["pid"], " ".join(argv)))
+    _FOREIGN_CACHE.update(at=time.time(), value=found)
     return found
 
 
 def start(force: bool = False) -> str:
     if (pid := read_pid()):
         return f"already running (pid {pid})"
-    if not force and (others := foreign_instances()):
+    # max_age=0: starting is exactly when a stale answer would matter.
+    if not force and (others := foreign_instances(max_age=0)):
         listed = "; ".join(f"pid {p}" for p, _ in others)
         return ("refusing to start: another radar is running outside this "
                 f"project ({listed}). Two instances double the traffic to "

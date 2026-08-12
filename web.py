@@ -74,17 +74,27 @@ app = FastAPI(title="Whatnot Radar")
 LOOPBACK = {"127.0.0.1", "::1", "localhost", "testclient"}
 
 
+_PASSWORD_LOCK = threading.Lock()
+
+
 def ensure_password() -> str:
     """One random password per install, created on first run. Never shipped in
-    the repo — it lives in the user's own gitignored config."""
-    cfg = load_config()
-    pw = cfg.get("panel_password") or ""
-    if not pw:
+    the repo — it lives in the user's own gitignored config.
+
+    Locked because this sits in the auth path: without it, two simultaneous
+    first requests each generate a password, each write it, and one silently
+    wins — so the one printed to the console need not be the one that works.
+    """
+    with _PASSWORD_LOCK, config_lock():
+        cfg = load_config()
+        pw = cfg.get("panel_password") or ""
+        if pw:
+            return pw
         import secrets
         pw = "-".join(secrets.token_hex(2) for _ in range(3))  # xxxx-xxxx-xxxx
         cfg["panel_password"] = pw
         save_config(cfg)
-    return pw
+        return pw
 
 
 @app.middleware("http")
@@ -124,6 +134,9 @@ def save_config(cfg: dict) -> None:
     tmp = CONFIG_PATH.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
     tmp.replace(CONFIG_PATH)
+
+
+config_lock = profile_tools.config_lock   # shared with monitor.py
 
 
 def require_stopped() -> None:
@@ -456,9 +469,10 @@ def api_ssh_info():
 def api_set_config(patch: dict):
     if unknown := set(patch) - EDITABLE:
         raise HTTPException(400, f"not editable: {sorted(unknown)}")
-    cfg = load_config()
-    cfg.update(patch)
-    save_config(cfg)
+    with config_lock():
+        cfg = load_config()
+        cfg.update(patch)
+        save_config(cfg)
     return {"message": "saved — restart the radar to apply",
             "restart_needed": control.read_pid() is not None}
 
@@ -500,22 +514,23 @@ def api_seller(req: SellerReq):
     if len(names) > MAX_BULK_SELLERS:
         raise HTTPException(400, f"that's {len(names)} names — more than the "
                                  f"{MAX_BULK_SELLERS} limit. Split it up.")
-    cfg = load_config()
-    items = list(cfg.get(req.list_name, []))
-    existing = {s.strip().lower() for s in items}
+    with config_lock():
+        cfg = load_config()
+        items = list(cfg.get(req.list_name, []))
+        existing = {s.strip().lower() for s in items}
 
-    if req.remove:
-        items = [s for s in items if s.strip().lower() not in set(names)]
-        done = len(existing & set(names))
-        verb, skipped = "removed", len(names) - done
-    else:
-        new = [n for n in names if n not in existing]
-        items.extend(new)
-        done, skipped = len(new), len(names) - len(new)
-        verb = "blocked" if req.list_name == "blacklist" else "added"
+        if req.remove:
+            items = [s for s in items if s.strip().lower() not in set(names)]
+            done = len(existing & set(names))
+            verb, skipped = "removed", len(names) - done
+        else:
+            new = [n for n in names if n not in existing]
+            items.extend(new)
+            done, skipped = len(new), len(names) - len(new)
+            verb = "blocked" if req.list_name == "blacklist" else "added"
 
-    cfg[req.list_name] = items
-    save_config(cfg)
+        cfg[req.list_name] = items
+        save_config(cfg)
     tail = f" ({skipped} already {'gone' if req.remove else 'there'})" if skipped else ""
     return {req.list_name: items,
             "message": f"{verb} {done}{tail}",
@@ -701,9 +716,10 @@ def api_phone_access(req: PhoneAccessReq):
     A saved setting rather than a command-line flag because the launcher is how
     this actually gets started, and it passes no arguments.
     """
-    cfg = load_config()
-    cfg["panel_host"] = "0.0.0.0" if req.allow else "127.0.0.1"
-    save_config(cfg)
+    with config_lock():
+        cfg = load_config()
+        cfg["panel_host"] = "0.0.0.0" if req.allow else "127.0.0.1"
+        save_config(cfg)
     if not req.allow:
         return {"message": "phone access off — restart the panel to apply"}
     return {"message": "phone access saved — close the panel window and start "
@@ -733,9 +749,10 @@ def api_phone_qr(request: Request):
 def api_regen_password(request: Request):
     if (request.client.host if request.client else "") not in LOOPBACK:
         raise HTTPException(403, "Only from the computer itself")
-    cfg = load_config()
-    cfg.pop("panel_password", None)
-    save_config(cfg)
+    with config_lock():
+        cfg = load_config()
+        cfg.pop("panel_password", None)
+        save_config(cfg)
     return {"message": f"new password: {ensure_password()}"}
 
 
@@ -771,15 +788,16 @@ def api_discovery_source(req: SourceReq):
     bad = [c for c in req.countries if c not in COUNTRIES]
     if bad or not req.countries:
         raise HTTPException(400, f"pick at least one known country (bad: {bad})")
-    cfg = load_config()
-    cfg.setdefault("discovery", {})
-    cfg["discovery"]["enabled"] = True
-    cfg["discovery"]["sources"] = [{
-        "name": f"{req.category} shipped from {'/'.join(req.countries)}",
-        "feedId": feed_id,
-        "filters": [{"field": "userCountry.keyword", "values": req.countries}],
-    }]
-    save_config(cfg)
+    with config_lock():
+        cfg = load_config()
+        cfg.setdefault("discovery", {})
+        cfg["discovery"]["enabled"] = True
+        cfg["discovery"]["sources"] = [{
+            "name": f"{req.category} shipped from {'/'.join(req.countries)}",
+            "feedId": feed_id,
+            "filters": [{"field": "userCountry.keyword", "values": req.countries}],
+        }]
+        save_config(cfg)
     return {"discovery": cfg["discovery"],
             "restart_needed": control.read_pid() is not None}
 

@@ -6,6 +6,8 @@ Two very different operations, deliberately kept separate:
   clear_site_data()  — destructive, logs you out of Whatnot
 """
 
+import contextlib
+import os
 import shutil
 import sqlite3
 import tempfile
@@ -37,6 +39,50 @@ SITE_DATA_PATHS = COOKIE_PATHS + [
     "Default/Local Storage", "Default/Session Storage",
     "Default/IndexedDB", "Default/Service Worker",
 ]
+
+
+CONFIG_LOCK = PROJECT_DIR / ".config.lock"
+
+
+@contextlib.contextmanager
+def config_lock(timeout: float = 5.0):
+    """Serialise config.json read-modify-write across processes.
+
+    The panel and the monitor both rewrite config.json — the panel when you
+    change a setting, the monitor when a show ends and a manual buyer flag is
+    cleared. Each write is atomic, so the file can never tear, but without this
+    the two can interleave read/read/write/write and one update is simply lost.
+
+    O_CREAT|O_EXCL rather than a library: it needs no dependency and behaves
+    the same on Windows. A stale lock from a killed process is broken after
+    the timeout rather than deadlocking forever.
+    """
+    deadline = time.time() + timeout
+    fd = None
+    while True:
+        try:
+            fd = os.open(CONFIG_LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except FileExistsError:
+            if time.time() >= deadline:
+                # Whoever holds it is gone or wedged; take it rather than
+                # block a config change forever.
+                try:
+                    CONFIG_LOCK.unlink()
+                except OSError:
+                    pass
+                continue
+            time.sleep(0.05)
+        except OSError:
+            break              # unwritable dir: proceed unlocked, don't fail
+    try:
+        yield
+    finally:
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+            with contextlib.suppress(OSError):
+                CONFIG_LOCK.unlink()
 
 
 def _size(path: Path) -> int:

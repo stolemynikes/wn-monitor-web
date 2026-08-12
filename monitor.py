@@ -10,6 +10,7 @@ Subcommands:
 """
 
 import argparse
+import hashlib
 import json
 import random
 import re
@@ -42,50 +43,21 @@ DISCOVERY_QUERY_PATH = PROJECT_DIR / "discovery_getfeed.graphql"
 SEND_LOG_PATH = PROJECT_DIR / "notifications.log"
 
 
-def find_google_chrome() -> str | None:
-    """Return the real Chrome executable if present, else None."""
-    candidates = [
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-        "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
-        "/usr/bin/google-chrome",
-        "/usr/bin/google-chrome-stable",
-        "/opt/google/chrome/google-chrome",
-        "C:/Program Files/Google/Chrome/Application/chrome.exe",
-        "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
-    ]
-    for path in candidates:
-        if Path(path).exists():
-            return str(path)
-    for command in ("google-chrome", "google-chrome-stable", "chrome"):
-        try:
-            import shutil as _shutil
-            resolved = _shutil.which(command)
-            if resolved:
-                return resolved
-        except Exception:
-            pass
-    return None
+# Chrome discovery and launch flags live in browser_task, which the panel also
+# uses for the manual login. Two copies had already drifted — that one lacked
+# extra_args — and a launch difference between the login browser and the radar
+# is exactly the kind of thing that changes how Whatnot sees us.
+from browser_task import find_google_chrome  # noqa: E402  (path set above)
 
 
-def build_browser_launch_kwargs(user_data_dir: str | Path, *, headless: bool = False, extra_args=None):
-    """Use the real Chrome executable and persistent profile without unsupported sandbox flags."""
-    kwargs = {
-        "user_data_dir": str(user_data_dir),
-        "headless": headless,
-        "chromium_sandbox": True,
-    }
-    chrome_path = find_google_chrome()
-    if chrome_path:
-        kwargs["executable_path"] = chrome_path
+def build_browser_launch_kwargs(user_data_dir, *, headless: bool = False,
+                                extra_args=None):
+    """Real Chrome and a persistent profile, without unsupported sandbox flags."""
+    from browser_task import build_browser_launch_kwargs as base
+    kwargs = base(user_data_dir, headless=headless)
     if extra_args:
         kwargs["args"] = list(extra_args)
     return kwargs
-
-
-# Anything further off-screen than this is not a window a person is using.
-# Windows parks minimised windows at -32000,-32000, which is a free, very
-# high-confidence bot signal for anyone reading window.screenX from JS.
-OFFSCREEN_LIMIT = -10000
 
 
 def normalise_window(ctx):
@@ -204,20 +176,24 @@ def remove_bought_seller(seller: str) -> bool:
     """Drop a seller from config.json's bought_sellers (case-insensitive), so a
     stale manual buyer-eligibility flag doesn't re-arm on restart. Returns True
     if the config changed."""
-    try:
-        with open(CONFIG_PATH, encoding="utf-8") as f:
-            cfg = json.load(f)
-    except (OSError, ValueError):
-        return False
-    current = cfg.get("bought_sellers", [])
-    kept = [s for s in current if s.strip().lower() != seller.strip().lower()]
-    if len(kept) == len(current):
-        return False
-    cfg["bought_sellers"] = kept
-    tmp = CONFIG_PATH.with_suffix(".json.tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2, ensure_ascii=False)
-    tmp.replace(CONFIG_PATH)
+    import profile_tools
+    # Held across the read AND the write: the panel rewrites this same file,
+    # and without the lock one of the two updates is silently lost.
+    with profile_tools.config_lock():
+        try:
+            with open(CONFIG_PATH, encoding="utf-8") as f:
+                cfg = json.load(f)
+        except (OSError, ValueError):
+            return False
+        current = cfg.get("bought_sellers", [])
+        kept = [s for s in current if s.strip().lower() != seller.strip().lower()]
+        if len(kept) == len(current):
+            return False
+        cfg["bought_sellers"] = kept
+        tmp = CONFIG_PATH.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2, ensure_ascii=False)
+        tmp.replace(CONFIG_PATH)
     return True
 
 
@@ -353,6 +329,28 @@ def send_notification(config, title, message, click_url, priority="high", tags=N
 # - Headless Chromium gets stuck on a Cloudflare interstitial; headful passes.
 
 BASE_URL = "https://www.whatnot.com"
+
+
+def fallback_gid(stream_id: str, ev: dict) -> str:
+    """A dedupe key for a giveaway the server gave no id for.
+
+    The old key was the stream plus a 10-minute time bucket, so two id-less
+    giveaways on one stream inside the same bucket collapsed into one and the
+    second was silently dropped as a duplicate. Giveaways run about five
+    minutes, so a seller chaining them hit this routinely.
+
+    Prefer the product id; otherwise identify the giveaway by what it IS — its
+    title and its end time. Both are stable across a re-delivered frame, so
+    genuine duplicates still dedupe, while two different prizes do not.
+    """
+    if ev.get("product_id"):
+        return f"ws:{stream_id}:{ev['product_id']}"
+    title, ends = ev.get("title") or "", ev.get("ends_at_ms")
+    if title or ends:
+        seed = f"{stream_id}|{title}|{ends}"
+        return "ws:" + hashlib.sha1(seed.encode("utf-8")).hexdigest()[:16]
+    # Nothing identifying at all: the old bucket, which is the best available.
+    return f"ws:{stream_id}:{int(time.time() // 600)}"
 
 
 def jitter(seconds: float) -> float:
@@ -612,6 +610,10 @@ class StreamWatcher:
             "detected_at": time.monotonic(),  # for alert-latency instrumentation
             "followers_only": bool(gw.get("onlyFollowers")),
             "ends_in": (end_ms / 1000 - time.time()) if end_ms else None,
+            # Absolute, unlike ends_in, so it is stable if the same frame is
+            # delivered twice — see fallback_gid().
+            "ends_at_ms": end_ms,
+            "product_id": str(product.get("id") or ""),
         })
         # Suppressed kinds (buyers-only, low-value prizes, foreign
         # domestic-only) earn neither the rotation hold nor giveaway-activity
@@ -791,14 +793,55 @@ def cmd_run(config: dict) -> None:
             time.sleep(min(1.0, deadline - time.monotonic()))
 
     sellers = config.get("sellers", [])
-    blacklist = {s.strip().lower() for s in config.get("blacklist", [])}
-    # Temporary blocks: {seller_lower: ISO expiry}. Auto-lift when expired.
-    temp_blacklist = {}
-    for s, exp in (config.get("blacklist_temp", {}) or {}).items():
+
+    def read_blocklists(cfg: dict):
+        block = {s.strip().lower() for s in cfg.get("blacklist", [])}
+        # Temporary blocks: {seller_lower: ISO expiry}. Auto-lift when expired.
+        temp = {}
+        for s, exp in (cfg.get("blacklist_temp", {}) or {}).items():
+            try:
+                temp[s.strip().lower()] = datetime.fromisoformat(exp)
+            except (ValueError, TypeError):
+                pass
+        return block, temp
+
+    blacklist, temp_blacklist = read_blocklists(config)
+    blocklist_checked = {"at": 0.0, "mtime": 0.0}
+    BLOCKLIST_RELOAD_SECONDS = 15
+
+    def reload_blocklists() -> None:
+        """Pick up block/unblock without a restart.
+
+        Only the block lists: poll intervals and tab counts are read once on
+        purpose, because changing them mid-run would reshape rotation
+        underneath itself. Blocking is the setting that actually gets used
+        while the radar is running — usually because a seller is spamming
+        right now — and waiting for a restart to act on it is the wrong
+        answer.
+        """
+        nonlocal blacklist, temp_blacklist
+        now = time.monotonic()
+        if now - blocklist_checked["at"] < BLOCKLIST_RELOAD_SECONDS:
+            return
+        blocklist_checked["at"] = now
+        try:                       # skip the parse when the file hasn't moved
+            mtime = CONFIG_PATH.stat().st_mtime
+        except OSError:
+            return
+        if mtime == blocklist_checked["mtime"]:
+            return
+        blocklist_checked["mtime"] = mtime
         try:
-            temp_blacklist[s.strip().lower()] = datetime.fromisoformat(exp)
-        except (ValueError, TypeError):
-            pass
+            fresh = load_config()
+        except (OSError, ValueError):
+            return          # mid-write by the panel; next poll will get it
+        new_block, new_temp = read_blocklists(fresh)
+        added = new_block - blacklist
+        if added:
+            log(f"blocklist updated: +{len(added)} "
+                f"({', '.join(sorted(added)[:5])}{'…' if len(added) > 5 else ''})")
+        if new_block != blacklist or new_temp != temp_blacklist:
+            blacklist, temp_blacklist = new_block, new_temp
 
     def is_blocked(seller: str) -> bool:
         s = seller.strip().lower()
@@ -1113,6 +1156,14 @@ def cmd_run(config: dict) -> None:
                 return
             cap = effective_cap()
             for sid, w in list(watchers.items()):
+                # Blocking someone should shut their tab now, not at the next
+                # restart — you normally block a seller because they are
+                # spamming at this moment.
+                if is_blocked(w.seller):
+                    log(f"{w.seller}: closing tab (blocked)")
+                    w.close()
+                    del watchers[sid]
+                    continue
                 gone = (
                     (w.source == "seller" and sid not in seller_live)
                     or (w.source == "discovery"
@@ -1235,7 +1286,7 @@ def cmd_run(config: dict) -> None:
                                  or w.seller.lower() in manual_bought)
                 events = w.drain()
                 for ev in events:
-                    gid = ev["id"] or f"ws:{sid}:{int(time.time() // 600)}"
+                    gid = ev["id"] or fallback_gid(sid, ev)
                     last_ws_giveaway[sid] = time.monotonic()
                     # Low-value prizes still earn rotation credit: a sticker
                     # streak signals an active giveaway host whose next round
@@ -1391,6 +1442,10 @@ def cmd_run(config: dict) -> None:
                     except Exception:
                         pass
                     return
+
+                # Cheap local file read, on the same cadence as the polls that
+                # would act on a change anyway.
+                reload_blocklists()
 
                 if sellers and time.monotonic() >= next_seller_poll:
                     live_now = {}
@@ -1556,8 +1611,18 @@ def cmd_run(config: dict) -> None:
             log("Shutting down.")
             for w in watchers.values():
                 w.close()
-            save_state(state)
-            ctx.close()
+            try:
+                save_state(state)
+            except Exception as exc:
+                log(f"could not save state ({exc.__class__.__name__})")
+            # Guarded on purpose: this call has hung outright before (see the
+            # signal note at the top of cmd_run). Unprotected, a hang here
+            # means no "Bye.", no exit, and control.stop() force-killing us
+            # 15 seconds later with nothing in the log to explain why.
+            try:
+                ctx.close()
+            except Exception as exc:
+                log(f"browser did not close cleanly ({exc.__class__.__name__})")
             log("Bye.")
 
 

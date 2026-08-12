@@ -280,6 +280,9 @@ bot protection. An old laptop or a Raspberry Pi at home works much better.
 
 ## For technical users
 
+- `python test_radar.py` — the test suite. stdlib `unittest`, no extra
+  dependency. Every case corresponds to a defect that actually shipped.
+
 - `python control.py start|stop|restart|status` — run it without the panel.
 - `python monitor.py run` — foreground, logs to stdout.
 - `python monitor.py test` — send a test notification.

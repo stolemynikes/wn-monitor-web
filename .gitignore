@@ -12,3 +12,4 @@ radar.log
 .login_result
 .session_seen
 .tmp_launch_check/
+.config.lock

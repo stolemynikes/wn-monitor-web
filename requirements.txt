@@ -1,6 +1,11 @@
-playwright>=1.40
-requests>=2.31
-psutil>=5.9
-fastapi>=0.110
-uvicorn>=0.29
-qrcode>=7.4
+# Upper bounds on purpose. The radar depends on behaviour these libraries do
+# not document: Playwright's default Chromium flags and its CDP surface
+# (Target.createTarget with background:true is what stops rotation stealing
+# focus). A silent major bump could change either, so pin the majors and
+# upgrade deliberately.
+playwright>=1.40,<2
+requests>=2.31,<3
+psutil>=5.9,<8
+fastapi>=0.110,<1
+uvicorn>=0.29,<1
+qrcode>=7.4,<9
