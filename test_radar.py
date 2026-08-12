@@ -314,5 +314,124 @@ class AuditLog(TempProject):
         monitor.audit_send("bark", "max", "title", "OK")   # must not raise
 
 
+class StopPathsActuallyStop(unittest.TestCase):
+    """A challenge must end the run, not just the helper that spotted it.
+
+    Shipped bug: announce_challenge() was followed by `return` inside
+    process_watchers(), a nested helper — so the run loop carried on,
+    re-detected the same challenge two seconds later, and pushed the
+    notification again, indefinitely. Source-level checks, because cmd_run is
+    a 700-line closure over a live browser and cannot be called in a test;
+    they catch the specific mistake of a stop path that does not set the flag.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import ast
+        cls.ast = ast
+        source = pathlib.Path(__file__).with_name("monitor.py").read_text(
+            encoding="utf-8")
+        tree = ast.parse(source)
+        cls.cmd_run = next(n for n in ast.walk(tree)
+                           if isinstance(n, ast.FunctionDef)
+                           and n.name == "cmd_run")
+        cls.helpers = {n.name: n for n in ast.walk(cls.cmd_run)
+                       if isinstance(n, ast.FunctionDef) and n is not cls.cmd_run}
+
+    def test_announce_sets_the_shutdown_flag(self):
+        fn = self.helpers["announce_challenge"]
+        sets_flag = any(
+            isinstance(n, self.ast.Assign)
+            and any(isinstance(t, self.ast.Subscript)
+                    and getattr(t.value, "id", "") == "stop" for t in n.targets)
+            for n in self.ast.walk(fn))
+        self.assertTrue(sets_flag,
+                        "announce_challenge must set stop['requested']; a bare "
+                        "return from a nested helper does not end the run loop")
+
+    def test_announce_is_guarded_against_repeating(self):
+        fn = self.helpers["announce_challenge"]
+        names = {n.id for n in self.ast.walk(fn) if isinstance(n, self.ast.Name)}
+        self.assertIn("announced_challenge", names,
+                      "one challenge must produce one notification, not one "
+                      "per loop tick")
+
+    def test_run_loop_honours_the_flag(self):
+        loops = [n for n in self.ast.walk(self.cmd_run)
+                 if isinstance(n, self.ast.While)]
+        honoured = any("stop" in self.ast.dump(n.test) for n in loops)
+        self.assertTrue(honoured, "the main loop must exit on stop['requested']")
+
+
+def _playwright_available():
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return False
+    try:
+        with sync_playwright() as pw:
+            pw.chromium.launch(headless=True).close()
+        return True
+    except Exception:
+        return False
+
+
+@unittest.skipUnless(_playwright_available(), "needs a Playwright browser")
+class ChallengeDetection(unittest.TestCase):
+    """A Turnstile widget sat on every stream tab undetected: it leaves
+    Whatnot's own title in place and lives in a cross-origin iframe."""
+
+    @classmethod
+    def setUpClass(cls):
+        from playwright.sync_api import sync_playwright
+        cls._pw = sync_playwright().start()
+        cls._browser = cls._pw.chromium.launch(headless=True)
+        cls.page = cls._browser.new_page()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._browser.close()
+        cls._pw.stop()
+
+    def marker(self, html):
+        self.page.set_content(html)
+        return monitor.challenge_marker(self.page)
+
+    def test_full_interstitial(self):
+        self.assertTrue(self.marker("<title>Just a moment...</title><body>x"))
+
+    def test_interstitial_with_generic_title(self):
+        self.assertTrue(
+            self.marker("<title>whatnot</title><body><div id='challenge-running'>x</div>"))
+
+    def test_visible_turnstile_widget(self):
+        self.assertTrue(self.marker(
+            "<title>Whatnot | Live</title><body>"
+            "<iframe src='https://challenges.cloudflare.com/x'"
+            " style='width:300px;height:65px'></iframe>"))
+
+    def test_challenge_text(self):
+        self.assertTrue(self.marker(
+            "<title>Whatnot</title><body><p>Verify you are human</p>"))
+
+    def test_normal_page_is_clean(self):
+        self.assertEqual(self.marker(
+            "<title>Whatnot | Live</title><body><h1>Pokemon break</h1>"), "")
+
+    def test_cf_protected_page_without_a_challenge_is_clean(self):
+        # challenge-platform scripts are on EVERY Cloudflare-protected page.
+        # Matching them would stop the radar permanently.
+        self.assertEqual(self.marker(
+            "<title>Whatnot | Live</title><body>"
+            "<script src='/cdn-cgi/challenge-platform/h/b/scripts/x.js'></script>"), "")
+
+    def test_hidden_turnstile_is_clean(self):
+        # A zero-size widget is a passive check that resolves itself.
+        self.assertEqual(self.marker(
+            "<title>Whatnot | Live</title><body>"
+            "<iframe src='https://challenges.cloudflare.com/x'"
+            " style='width:0;height:0'></iframe>"), "")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

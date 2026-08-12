@@ -368,15 +368,50 @@ def is_logged_out(page) -> bool:
     return locator.count() > 0
 
 
-def is_bot_challenge(page) -> bool:
-    # Cloudflare's interstitial reliably sets the title; a scoped text locator
-    # avoids serializing the whole DOM (page.content()) on every call.
-    if any(m in page.title() for m in ("Just a moment", "Attention Required")):
-        return True
+# Cloudflare has two shapes and the old check only knew one. The full-page
+# interstitial replaces the document and changes the title. A Turnstile widget
+# appears INSIDE the normal page — Whatnot's own title, Whatnot's own DOM, and
+# the checkbox living in a cross-origin iframe that page.get_by_text does not
+# search. So a challenge could sit on every stream tab undetected.
+#
+# Deliberately NOT matched: script[src*="challenge-platform"]. Cloudflare
+# injects that on every page it protects, challenge or not, so keying on it
+# would stop the radar permanently.
+CHALLENGE_PROBE = """() => {
+    const title = document.title || '';
+    if (/just a moment|attention required|checking your browser/i.test(title))
+        return 'interstitial (title: ' + title.slice(0, 40) + ')';
+    // Interstitial scaffolding, present even when the title is generic.
+    if (document.querySelector('#challenge-running, #challenge-form, #cf-chl-widget'))
+        return 'interstitial (challenge form)';
+    // Turnstile embedded in an otherwise normal page. Require it to be
+    // rendered: an invisible one can be a passive check that resolves itself.
+    for (const f of document.querySelectorAll(
+            'iframe[src*="challenges.cloudflare.com"]')) {
+        const r = f.getBoundingClientRect();
+        if (r.width > 20 && r.height > 20) return 'turnstile widget';
+    }
+    const text = (document.body && document.body.innerText || '').slice(0, 4000);
+    if (/verify you are human|security verification|enable javascript and cookies to continue/i.test(text))
+        return 'challenge text on the page';
+    return '';
+}"""
+
+
+def challenge_marker(page) -> str:
+    """Describe the bot challenge on this page, or '' if there isn't one.
+
+    Returns the reason rather than a bool so the log can say what matched —
+    "it stopped and I don't know why" is not a useful state to be in.
+    """
     try:
-        return page.get_by_text("security verification").count() > 0
+        return page.evaluate(CHALLENGE_PROBE) or ""
     except Exception:
-        return False
+        return ""
+
+
+def is_bot_challenge(page) -> bool:
+    return bool(challenge_marker(page))
 
 
 def check_seller_live(page, username: str):
@@ -472,6 +507,7 @@ class StreamWatcher:
         # sailed through while every stream tab hit "just a moment" was
         # detected nowhere: no notification, no stop.
         self.challenged = False
+        self.challenge_reason = ""
         self.last_challenge_check = 0.0
         # CDP background target: opens the tab without activating the browser
         # window, so rotation doesn't pull the desktop over. Fallback to
@@ -641,10 +677,8 @@ class StreamWatcher:
         if now - self.last_challenge_check < every:
             return False
         self.last_challenge_check = now
-        try:
-            self.challenged = is_bot_challenge(self.page)
-        except Exception:
-            self.challenged = False
+        self.challenge_reason = challenge_marker(self.page)
+        self.challenged = bool(self.challenge_reason)
         return self.challenged
 
     def drain(self):
@@ -1087,8 +1121,24 @@ def cmd_run(config: dict) -> None:
         next_seller_poll = 0.0
         next_disc_poll = 0.0
 
-        def announce_challenge(where: str) -> None:
-            """Log, notify and restore, wherever the challenge turned up."""
+        announced_challenge = {"done": False}
+
+        def announce_challenge(where: str, why: str = "") -> None:
+            """Log, notify, and actually end the run.
+
+            Both parts learned the hard way. process_watchers() is a nested
+            helper, so its `return` only left the helper — the run loop carried
+            straight on, re-detected the same challenge two seconds later and
+            pushed the notification again, forever. Setting the shutdown flag
+            is what stops the radar; the guard makes sure one challenge
+            produces exactly one notification even if several tabs see it in
+            the same tick.
+            """
+            if announced_challenge["done"]:
+                return
+            announced_challenge["done"] = True
+            stop["requested"] = True
+            where = f"{where} [{why}]" if why else where
             log(f"Cloudflare challenge detected on {where} — stopping. "
                 "Leave it off for a few hours; these fade on their own. "
                 "If it comes back straight away, use Fresh profile in the "
@@ -1110,8 +1160,8 @@ def cmd_run(config: dict) -> None:
 
         def check_session(page) -> bool:
             """True if the monitor must stop (bot challenge / logged out)."""
-            if is_bot_challenge(page):
-                announce_challenge("the discovery page")
+            if (why := challenge_marker(page)):
+                announce_challenge("the discovery page", why)
                 return True
             if is_logged_out(page):
                 log("Logged out — run `monitor.py login` again. Stopping.")
@@ -1268,7 +1318,8 @@ def cmd_run(config: dict) -> None:
                 # The stream tabs are where a challenge actually shows up: the
                 # discovery poll is a GraphQL call and sails through it.
                 if w.check_challenge():
-                    announce_challenge(f"{w.seller}'s stream tab")
+                    announce_challenge(f"{w.seller}'s stream tab",
+                                       w.challenge_reason)
                     return
                 # Detected my purchase here → this show's buyers-giveaways open up.
                 if w.purchases:
