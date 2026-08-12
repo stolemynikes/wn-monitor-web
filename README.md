@@ -123,15 +123,15 @@ Now leave it alone and wait for your phone to buzz.
 A browser window sits open on your computer while it runs. That's the tool
 doing its job — **don't close it**, that stops the radar.
 
-If it's in your way, tick **keep the browser window minimised** under
-*intensity*. It then lives in the Dock instead of on your desktop.
+The radar never moves, resizes or minimises that window. A window in an odd
+position or size is something web pages can read, and on Windows a minimised
+window reports itself 32,000 pixels off-screen — which in testing drew
+"checking your browser" pages that didn't otherwise appear.
 
-**Not available on Windows.** Windows minimises a window by moving it to an
-off-screen coordinate, and web pages can read that position — it looks like a
-bot, and in testing it drew "checking your browser" pages that didn't appear
-otherwise. Put the window on a second virtual desktop instead (`Win+Ctrl+D`,
-then `Win+Tab` and drag it across), or just leave it behind your other windows.
-Neither of those moves it, so neither has the problem.
+To get it out of the way, put it on a second desktop (`Win+Ctrl+D`, then
+`Win+Tab` and drag it across; Mission Control on a Mac) or just leave it behind
+your other windows. Neither changes anything the page can see. New tabs open in
+the background, so it won't jump in front of you while you're working.
 
 It checks itself rather than trusting that this is safe. On start it minimises,
 watches for a few seconds to confirm Whatnot still sees the page as visible and

@@ -83,35 +83,6 @@ def build_browser_launch_kwargs(user_data_dir: str | Path, *, headless: bool = F
     return kwargs
 
 
-PROBE_INSTALL = """() => {
-    window.__wnProbe = {ticks: 0, frames: 0, hidden: 0, stop: false,
-        geo: [screenX, screenY, outerWidth, outerHeight]};
-    const p = window.__wnProbe;
-    p._t = setInterval(() => p.ticks++, 250);
-    const frame = () => { if (!p.stop) { p.frames++; requestAnimationFrame(frame); } };
-    requestAnimationFrame(frame);
-    p._v = () => p.hidden++;
-    document.addEventListener('visibilitychange', p._v);
-}"""
-
-PROBE_READ = """() => {
-    const p = window.__wnProbe || {};
-    return {ticks: p.ticks|0, frames: p.frames|0, hidden: p.hidden|0,
-            visibility: document.visibilityState,
-            geoBefore: p.geo || [],
-            geoAfter: [screenX, screenY, outerWidth, outerHeight]};
-}"""
-
-PROBE_CLEAR = """() => {
-    const p = window.__wnProbe;
-    if (!p) return;
-    p.stop = true; clearInterval(p._t);
-    document.removeEventListener('visibilitychange', p._v);
-    delete window.__wnProbe;
-}"""
-
-PROBE_INTERVAL = 0.25   # seconds between probe ticks
-
 # Anything further off-screen than this is not a window a person is using.
 # Windows parks minimised windows at -32000,-32000, which is a free, very
 # high-confidence bot signal for anyone reading window.screenX from JS.
@@ -121,14 +92,14 @@ OFFSCREEN_LIMIT = -10000
 def normalise_window(ctx):
     """Report the browser window's real position, and drag it back on screen.
 
-    Reported 2026-08-11: on Windows the radar came up minimised with the
-    minimise option switched OFF, so nothing here put it there — Chrome was
-    started that way, or restored a stored off-screen placement. That matters
-    beyond tidiness: a window at -32000,-32000 is visible to page JavaScript
-    through screenX/screenY, and the stream tabs in that session were served
+    The radar never minimises or resizes the window itself — but Chrome has
+    been observed starting minimised on Windows on its own, either launched
+    that way or restoring a stored placement. That matters beyond tidiness: a
+    window at -32000,-32000 is visible to page JavaScript through
+    screenX/screenY, and stream tabs loaded in that state were served
     Cloudflare challenges while the plain GraphQL discovery call was fine.
 
-    Returns a description of what was found, for the log — the state the radar
+    Corrective only, and it logs what it found either way — the state the radar
     actually starts in should not have to be guessed at.
     """
     page = ctx.pages[0] if ctx.pages else None
@@ -172,8 +143,7 @@ def _set_window_state(cdp, window_id, state: str, timeout: float = 4.0) -> bool:
 
     setWindowBounds returns before the window manager has finished — macOS
     animates de-miniaturisation, and an immediate read still says "minimized".
-    Caught by testing the failure path: a restore we assumed had worked left
-    the window hidden after we had just decided hiding it was unsafe.
+    Without the wait, a window we believed we had restored stayed hidden.
     """
     deadline = time.monotonic() + timeout
     while True:
@@ -189,89 +159,6 @@ def _set_window_state(cdp, window_id, state: str, timeout: float = 4.0) -> bool:
         if time.monotonic() >= deadline:
             return False
         time.sleep(0.25)
-
-
-def minimize_window(ctx, verify_seconds: float = 4.0):
-    """Minimise the browser, but only keep it minimised if the page can't tell.
-
-    Measured on macOS 2026-08-11: while minimised, document.visibilityState
-    stays "visible", no visibilitychange fires, timers keep full rate, and
-    every window/screen dimension is unchanged.
-
-    That was initially credited to Playwright's
-    --disable-backgrounding-occluded-windows and friends, but removing all
-    three flags changed nothing — so it is macOS behaviour, not a flag we can
-    count on carrying to Windows. There, Chromium can reach minimisation
-    through widget visibility rather than occlusion, and no test here can say
-    what happens. If the page does go hidden, Whatnot's channel heartbeats get
-    throttled and the presence holding a giveaway entry open dies silently,
-    which is the worst failure this tool has.
-
-    So it measures rather than assumes, on whatever platform it is running:
-    minimise, watch for a few seconds, and put the window back if anything
-    observable changed. Returns (minimised, reason).
-    """
-    # Not on Windows, ever. Minimising there is implemented by moving the
-    # window to -32000,-32000, which page scripts read straight off
-    # screenX/screenY. Stream tabs loaded in that state were served Cloudflare
-    # challenges; loaded with the window on screen, they were not. The geometry
-    # check below would catch it and undo it, but there is no reason to make
-    # the attempt at all.
-    if sys.platform == "win32":
-        return False, ("not attempted on Windows — minimising there parks the "
-                       "window at an off-screen coordinate that pages can read")
-    page = ctx.pages[0] if ctx.pages else None
-    if page is None:
-        return False, "no page to attach to"
-    cdp = None
-    try:
-        cdp = ctx.new_cdp_session(page)
-        window_id = cdp.send("Browser.getWindowForTarget")["windowId"]
-        page.evaluate(PROBE_INSTALL)
-        if not _set_window_state(cdp, window_id, "minimized"):
-            page.evaluate(PROBE_CLEAR)
-            return False, "the window manager would not minimise it"
-
-        time.sleep(verify_seconds)
-        probe = page.evaluate(PROBE_READ)
-        page.evaluate(PROBE_CLEAR)
-
-        expected = verify_seconds / PROBE_INTERVAL
-        throttled = probe["ticks"] < expected * 0.5
-        noticed = probe["visibility"] != "visible" or probe["hidden"] > 0
-        # Geometry matters as much as visibility, and this guard originally
-        # missed it. Windows minimises by parking the window at -32000,-32000,
-        # which page JavaScript reads straight off screenX/screenY — a browser
-        # at an impossible coordinate is a free bot signal, and stream tabs in
-        # exactly that state were served Cloudflare challenges.
-        before, after = probe.get("geoBefore") or [], probe.get("geoAfter") or []
-        moved = bool(before) and before != after
-        if noticed or throttled or moved:
-            why = ("the page was told it is hidden" if noticed
-                   else f"the window reports itself at {after[0]},{after[1]} "
-                        f"instead of {before[0]},{before[1]}" if moved
-                   else f"timers slowed to {probe['ticks']}/{int(expected)}")
-            restored = _set_window_state(cdp, window_id, "normal")
-            tail = ("window put back on screen" if restored else
-                    "COULD NOT put the window back — restore it from the "
-                    "Dock/taskbar yourself")
-            harm = ("which page scripts can read, and an impossible window "
-                    "position is exactly what bot checks look for" if moved else
-                    "which would break the heartbeats holding your giveaway "
-                    "entries")
-            return False, f"{why} while minimised, {harm} — {tail}"
-        # Animation frames stopping is expected and harmless: detection runs on
-        # the WebSocket and on timers, neither of which needs the compositor.
-        extra = "" if probe["frames"] else "; animation frames paused (harmless)"
-        return True, f"verified the page cannot tell{extra}"
-    except Exception as exc:
-        return False, f"{exc.__class__.__name__} while minimising"
-    finally:
-        if cdp is not None:
-            try:
-                cdp.detach()
-            except Exception:
-                pass
 
 
 def backup_profile(source_dir: Path = PROFILE_DIR, backup_dir: Path = PROFILE_BACKUP_DIR) -> bool:
@@ -1127,10 +1014,6 @@ def cmd_run(config: dict) -> None:
         # Always say where the window actually is, even when we did nothing to
         # it: "it started minimised on its own" is otherwise unfalsifiable.
         log(normalise_window(ctx))
-        if config.get("minimize_browser", False):
-            minimized, why = minimize_window(ctx)
-            log(f"browser window minimized — {why}" if minimized else
-                f"browser window left on screen — {why}")
         watchers = {}          # stream_id -> StreamWatcher
         seller_live = {}       # stream_id -> (seller, url, title), from seller polls
         discovered = {}        # stream_id -> (seller, url, title), from discovery

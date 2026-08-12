@@ -53,8 +53,8 @@ SERVE_HOST = "127.0.0.1"   # set from --host at startup
 EDITABLE = {
     "my_username", "notifier", "bark_key", "ntfy_topic", "ntfy_server",
     "seller_poll_seconds", "giveaway_poll_seconds", "max_concurrent_streams",
-    "pinned_extra_tabs", "watch_giveaways", "headless", "minimize_browser",
-    "sellers", "blacklist", "blacklist_temp", "bought_sellers", "foreign_sellers",
+    "pinned_extra_tabs", "watch_giveaways", "headless", "sellers", "blacklist",
+    "blacklist_temp", "bought_sellers", "foreign_sellers",
     "discovery", "panel_password", "panel_host",
 }
 
@@ -188,9 +188,6 @@ def api_status():
         "login_in_progress": login_running(),
         "login_result": result.read_text(encoding="utf-8") if result.exists() else "",
         "readiness": readiness(),
-        # The minimise option is refused on Windows, so the UI must not present
-        # it as a working switch there.
-        "is_windows": platform.system() == "Windows",
     }
 
 
