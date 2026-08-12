@@ -115,7 +115,9 @@ Now leave it alone and wait for your phone to buzz.
 
 - **Start / Stop** — the two buttons at the top. Stop it when you don't want it.
 - **Blocked sellers** — annoying seller? Type their username and click **Block**.
-  They disappear completely: no watching, no notifications.
+  They disappear completely: no watching, no notifications. You can paste a
+  whole list at once — commas, spaces or one per line all work, and a leading
+  `@` is ignored. Open **paste a list** for a bigger box.
 - **Live log** — what it's doing right now. Useful when something seems wrong.
 - **Tuning** — how many streams to watch at once. **Leave this alone unless you
   have a reason.** See "Going easy" below.

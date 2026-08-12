@@ -14,6 +14,7 @@ import io
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 import threading
@@ -468,23 +469,56 @@ class SellerReq(BaseModel):
     remove: bool = False
 
 
+MAX_BULK_SELLERS = 300
+
+
+def parse_sellers(raw: str) -> list[str]:
+    """Usernames out of whatever the box was given.
+
+    Accepts one name or a pasted list in any of the shapes people actually
+    have them in — comma separated, one per line, or space separated — and
+    tolerates the @ prefix that comes with copying from a chat.
+    """
+    seen, out = set(), []
+    for token in re.split(r"[,\s;]+", raw or ""):
+        name = token.strip().lstrip("@").strip().lower()
+        if not name or len(name) > 40 or name in seen:
+            continue
+        seen.add(name)
+        out.append(name)
+    return out
+
+
 @app.post("/api/seller")
 def api_seller(req: SellerReq):
     if req.list_name not in {"blacklist", "sellers", "bought_sellers",
                              "foreign_sellers"}:
         raise HTTPException(400, "unknown list")
+    names = parse_sellers(req.seller)
+    if not names:
+        raise HTTPException(400, "no usernames found in that")
+    if len(names) > MAX_BULK_SELLERS:
+        raise HTTPException(400, f"that's {len(names)} names — more than the "
+                                 f"{MAX_BULK_SELLERS} limit. Split it up.")
     cfg = load_config()
-    items = [s for s in cfg.get(req.list_name, [])]
-    name = req.seller.strip().lower()
-    if not name:
-        raise HTTPException(400, "empty seller name")
+    items = list(cfg.get(req.list_name, []))
+    existing = {s.strip().lower() for s in items}
+
     if req.remove:
-        items = [s for s in items if s.strip().lower() != name]
-    elif name not in [s.strip().lower() for s in items]:
-        items.append(name)
+        items = [s for s in items if s.strip().lower() not in set(names)]
+        done = len(existing & set(names))
+        verb, skipped = "removed", len(names) - done
+    else:
+        new = [n for n in names if n not in existing]
+        items.extend(new)
+        done, skipped = len(new), len(names) - len(new)
+        verb = "blocked" if req.list_name == "blacklist" else "added"
+
     cfg[req.list_name] = items
     save_config(cfg)
+    tail = f" ({skipped} already {'gone' if req.remove else 'there'})" if skipped else ""
     return {req.list_name: items,
+            "message": f"{verb} {done}{tail}",
             "restart_needed": control.read_pid() is not None}
 
 

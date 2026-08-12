@@ -324,11 +324,25 @@
     <section class="card">
       <h2>blocked sellers <span class="badge" id="blCount">0</span></h2>
       <div class="row">
-        <input type="text" id="blockName" placeholder="seller username" autocomplete="off"
-               spellcheck="false" style="flex:1; min-width:150px"
+        <input type="text" id="blockName" placeholder="username, or paste a list"
+               autocomplete="off" spellcheck="false" style="flex:1; min-width:150px"
                onkeydown="if(event.key==='Enter')addSeller()">
         <button class="sm" onclick="addSeller()">block</button>
       </div>
+      <p class="hint">One name, or many at once — separate them with commas,
+        spaces or new lines. A leading @ is fine. Use the box below to paste a
+        longer list.</p>
+      <details style="margin-top:8px">
+        <summary class="hint" style="cursor:pointer">paste a list</summary>
+        <textarea id="blockBulk" rows="4" spellcheck="false"
+          placeholder="sellername1, sellername2, sellername3"
+          style="width:100%; margin-top:8px; padding:11px 13px; border-radius:11px;
+                 font:12px/1.6 var(--mono); color:var(--ink); resize:vertical;
+                 background:rgba(0,0,0,.32); border:1px solid var(--hair)"></textarea>
+        <div class="row" style="margin-top:8px">
+          <button class="sm" onclick="addSellerBulk()">block all</button>
+        </div>
+      </details>
       <div class="tags" id="blacklist"></div>
     </section>
   </div>
@@ -743,6 +757,8 @@ document.addEventListener('click',e=>{
 
 function addSeller(){const v=$('#blockName').value.trim(); if(!v)return;
   post('/api/seller',{seller:v,list_name:'blacklist'}).then(()=>$('#blockName').value='');}
+function addSellerBulk(){const v=$('#blockBulk').value.trim(); if(!v)return;
+  post('/api/seller',{seller:v,list_name:'blacklist'}).then(()=>$('#blockBulk').value='');}
 function saveNotifier(){
   const n=$('#notifier').value,key=$('#notifKey').value.trim(),patch={notifier:n};
   if(key)patch[n==='bark'?'bark_key':'ntfy_topic']=key;
