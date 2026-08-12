@@ -234,7 +234,11 @@ def main() -> None:
         if read_pid() is not None:
             print("stop the radar first"); sys.exit(1)
         import profile_tools
-        freed = profile_tools.reset_profile()
+        freed, left = profile_tools.reset_profile()
+        if left:
+            print(f"removed {freed/1e6:.0f} MB but {left} file(s) survived — "
+                  "close every Chrome window; this is NOT a fresh profile")
+            sys.exit(1)
         print(f"profile reset ({freed/1e6:.0f} MB removed) — log in again "
               "before starting")
     elif action == "--json":

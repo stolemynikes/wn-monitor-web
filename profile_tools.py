@@ -136,7 +136,12 @@ def reset_profile() -> int:
     shutil.rmtree(PROFILE_DIR, ignore_errors=True)
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     _SIZE_CACHE["value"] = None
-    return freed
+    # ignore_errors hides the Windows case completely: files a browser still
+    # has open survive, rmtree says nothing, and the caller reports a reset
+    # that did not happen — leaving the same logged-in, possibly flagged
+    # profile in place. Report what is left instead.
+    left = [p for p in PROFILE_DIR.rglob("*") if p.is_file()]
+    return freed, len(left)
 
 
 def cookie_db() -> Path | None:

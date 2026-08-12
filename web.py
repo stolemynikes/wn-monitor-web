@@ -742,7 +742,13 @@ def api_regen_password(request: Request):
 @app.post("/api/reset-profile")
 def api_reset_profile():
     require_stopped()
-    freed = profile_tools.reset_profile()
+    require_profile_free()
+    freed, left = profile_tools.reset_profile()
+    if left:
+        return {"message": f"removed {freed / 1e6:.0f} MB but {left} file(s) "
+                           "survived — a program still has them open, so you "
+                           "are NOT on a fresh profile. Close every Chrome "
+                           "window and try again."}
     return {"message": f"profile reset ({freed / 1e6:.0f} MB removed) — "
                        "click Log in to sign in again"}
 

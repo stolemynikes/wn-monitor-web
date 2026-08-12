@@ -490,6 +490,12 @@ class StreamWatcher:
         self.last_dom_check = 0.0  # rate-limits the DOM giveaway fallback
         self.entry_peak = {}       # productId -> max entryCount seen (cap probe)
         self.ended = False
+        # Set when this tab is served a bot challenge. check_session() only
+        # ever looked at the discovery page, so a run where the GraphQL poll
+        # sailed through while every stream tab hit "just a moment" was
+        # detected nowhere: no notification, no stop.
+        self.challenged = False
+        self.last_challenge_check = 0.0
         # CDP background target: opens the tab without activating the browser
         # window, so rotation doesn't pull the desktop over. Fallback to
         # new_page() (focus-stealing but functional) if the CDP path breaks.
@@ -641,6 +647,24 @@ class StreamWatcher:
         hold = min(max(60.0, ends_in + 90.0), 420.0) if ends_in is not None else 360.0
         self.giveaway_hold_until = max(
             self.giveaway_hold_until, time.monotonic() + hold)
+
+    def check_challenge(self, every: float = 30.0) -> bool:
+        """Has Whatnot put a bot challenge in front of THIS tab?
+
+        Rate-limited: reading the title is a round trip per tab, and a
+        challenge that appears is not going away within thirty seconds.
+        """
+        if self.challenged or self.ended:
+            return self.challenged
+        now = time.monotonic()
+        if now - self.last_challenge_check < every:
+            return False
+        self.last_challenge_check = now
+        try:
+            self.challenged = is_bot_challenge(self.page)
+        except Exception:
+            self.challenged = False
+        return self.challenged
 
     def drain(self):
         """Return queued giveaway events. The brief wait gives Playwright a
@@ -1046,20 +1070,28 @@ def cmd_run(config: dict) -> None:
         next_seller_poll = 0.0
         next_disc_poll = 0.0
 
+        def announce_challenge(where: str) -> None:
+            """Log, notify and restore, wherever the challenge turned up."""
+            log(f"Cloudflare challenge detected on {where} — restoring the "
+                "last known-good profile and stopping.")
+            restore_profile()
+            print(f"Cloudflare challenge detected on {where}. The last "
+                  "known-good profile was restored. Run `python monitor.py "
+                  "login` again before restarting.", flush=True)
+            try:
+                notifier.send(
+                    "⚠️ Radar stopped: Cloudflare challenge ⚠️",
+                    f"Challenge on {where}. Stopped. Log in again before "
+                    "restarting, and leave it off for a few hours.",
+                    BASE_URL, priority="high",
+                )
+            except Exception:
+                pass
+
         def check_session(page) -> bool:
             """True if the monitor must stop (bot challenge / logged out)."""
             if is_bot_challenge(page):
-                log("Cloudflare challenge detected — restoring the last known-good profile and stopping.")
-                restore_profile()
-                print("Cloudflare challenge detected. The last known-good profile was restored. Run `python monitor.py login` again before restarting.", flush=True)
-                try:
-                    notifier.send(
-                        "⚠️ Radar stopped: Cloudflare challenge ⚠️",
-                        "Cloudflare challenge detected. The last known-good profile was restored. Run monitor.py login again to refresh the session.",
-                        BASE_URL, priority="high",
-                    )
-                except Exception:
-                    pass
+                announce_challenge("the discovery page")
                 return True
             if is_logged_out(page):
                 log("Logged out — run `monitor.py login` again. Stopping.")
@@ -1205,6 +1237,11 @@ def cmd_run(config: dict) -> None:
             main-loop tick AND between seller profile checks, so giveaway
             alerts aren't delayed by a long seller-poll cycle."""
             for sid, w in list(watchers.items()):
+                # The stream tabs are where a challenge actually shows up: the
+                # discovery poll is a GraphQL call and sails through it.
+                if w.check_challenge():
+                    announce_challenge(f"{w.seller}'s stream tab")
+                    return
                 # Detected my purchase here → this show's buyers-giveaways open up.
                 if w.purchases:
                     w.purchases = []
