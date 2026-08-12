@@ -603,8 +603,8 @@ class StreamWatcher:
         self.last_dom_check = 0.0  # rate-limits the DOM giveaway fallback
         self.entry_peak = {}       # productId -> max entryCount seen (cap probe)
         self.ended = False
-        # CDP background target: opens the tab without activating Chromium's
-        # window, so macOS doesn't switch Space on every rotation. Fallback to
+        # CDP background target: opens the tab without activating the browser
+        # window, so rotation doesn't pull the desktop over. Fallback to
         # new_page() (focus-stealing but functional) if the CDP path breaks.
         try:
             with ctx.expect_page() as pinfo:
@@ -613,7 +613,13 @@ class StreamWatcher:
                          {"url": "about:blank", "background": True})
                 cdp.detach()
             self.page = pinfo.value
-        except Exception:
+        except Exception as exc:
+            # Say so. This is the one path that steals focus — on Windows with
+            # the radar on a second virtual desktop it drags you across — and
+            # silently falling back left that looking like an unexplained
+            # desktop switch with nothing in the log to blame.
+            log(f"{seller}: background tab failed ({exc.__class__.__name__}), "
+                "opening a normal tab — this one takes focus")
             self.page = ctx.new_page()
         # Watchers only need the WebSocket, but a viewer that fetches ZERO
         # video is a bot signature. So mimic a real tab-switcher: play video
