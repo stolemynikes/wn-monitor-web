@@ -560,19 +560,42 @@ def api_login_finish():
     return {"message": "closing browser and saving session…"}
 
 
+def require_profile_free() -> None:
+    """Refuse while a browser still holds the profile.
+
+    require_stopped() only covers the radar. A login window left open — or a
+    Chrome that outlived one — keeps the files locked on Windows, and the
+    delete then fails halfway through.
+    """
+    from browser_task import chrome_owns_profile
+    if chrome_owns_profile():
+        raise HTTPException(409, "A browser still has the profile open. Close "
+                                 "the Whatnot login window and try again.")
+
+
+def _cleared(freed: int, stuck: list, tail: str) -> dict:
+    if stuck:
+        return {"message": f"cleared {freed / 1e6:.0f} MB, but {len(stuck)} "
+                           "item(s) were locked by a running program — close "
+                           "any Whatnot browser window and try again"}
+    return {"message": f"cleared {freed / 1e6:.0f} MB{tail}"}
+
+
 @app.post("/api/clear-cache")
 def api_clear_cache():
     require_stopped()
-    freed = profile_tools.clear_cache()
-    return {"message": f"cleared {freed / 1e6:.0f} MB of cache — still logged in"}
+    require_profile_free()
+    freed, stuck = profile_tools.clear_cache()
+    return _cleared(freed, stuck, " of cache — still logged in")
 
 
 @app.post("/api/clear-site-data")
 def api_clear_site_data():
     require_stopped()
-    freed = profile_tools.clear_site_data()
-    return {"message": f"cleared {freed / 1e6:.1f} MB of site data — "
-                       "you are now logged out, run Login again"}
+    require_profile_free()
+    freed, stuck = profile_tools.clear_site_data()
+    return _cleared(freed, stuck, " of site data — you are now logged out, "
+                                  "run Login again")
 
 
 def find_tailscale() -> str | None:
@@ -859,8 +882,12 @@ def _bind_failed(host: str, port: int) -> None:
 
 def serve(host: str, port: int) -> None:
     import uvicorn
+    # timeout_graceful_shutdown is the difference between Ctrl+C working and
+    # appearing to do nothing: the open panel page holds a keep-alive
+    # connection, and uvicorn's default is to wait for it indefinitely.
     server = uvicorn.Server(uvicorn.Config(app, host=host, port=port,
-                                           log_level="warning"))
+                                           log_level="warning",
+                                           timeout_graceful_shutdown=3))
     if platform.system() != "Windows":
         try:
             server.run()
@@ -880,6 +907,11 @@ def serve(host: str, port: int) -> None:
 
     async def run() -> None:
         def stop(*_):
+            # Second press means business: force_exit drops open connections
+            # instead of waiting for them.
+            if server.should_exit:
+                server.force_exit = True
+                print("\n  Forcing shutdown…", flush=True)
             server.should_exit = True
         for sig in (signal.SIGINT, signal.SIGBREAK):
             signal.signal(sig, stop)

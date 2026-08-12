@@ -85,26 +85,40 @@ def sizes(max_age: float = SIZE_CACHE_SECONDS) -> dict:
     return value
 
 
-def _delete(paths) -> int:
-    freed = 0
+def _delete(paths):
+    """Delete what we can. Returns (bytes freed, paths that would not go).
+
+    Windows locks open files outright, so a browser still holding the profile
+    makes unlink raise WinError 32 — which used to escape as a 500 from the
+    panel, having already deleted some of the list. Deleting the rest and
+    reporting what stuck is both safer and more useful than stopping halfway.
+    """
+    freed, stuck = 0, []
     for rel in paths:
         target = PROFILE_DIR / rel
-        freed += _size(target)
-        if target.is_dir():
-            shutil.rmtree(target, ignore_errors=True)
-        elif target.exists():
-            target.unlink(missing_ok=True)
+        if not target.exists():
+            continue
+        size = _size(target)
+        try:
+            if target.is_dir():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+        except OSError:
+            stuck.append(rel)
+            continue
+        freed += size
     _SIZE_CACHE["value"] = None   # the panel must show the new size at once
-    return freed
+    return freed, stuck
 
 
-def clear_cache() -> int:
-    """Delete disposable caches. Returns bytes freed. Session is untouched."""
+def clear_cache():
+    """Delete disposable caches. The session is untouched."""
     return _delete(CACHE_PATHS)
 
 
-def clear_site_data() -> int:
-    """Delete cookies and site storage — LOGS YOU OUT. Returns bytes freed."""
+def clear_site_data():
+    """Delete cookies and site storage — LOGS YOU OUT."""
     return _delete(SITE_DATA_PATHS)
 
 
