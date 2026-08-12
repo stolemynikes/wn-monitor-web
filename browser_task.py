@@ -16,7 +16,6 @@ from pathlib import Path
 
 PROJECT_DIR = Path(__file__).resolve().parent
 PROFILE_DIR = PROJECT_DIR / "whatnot-profile"
-PROFILE_BACKUP_DIR = PROJECT_DIR / "whatnot-profile-backup"
 DONE_FILE = PROJECT_DIR / ".login_done"
 RESULT_FILE = PROJECT_DIR / ".login_result"   # last outcome, shown in the panel
 LOGIN_TIMEOUT_SECONDS = 900  # 15 min, then close on its own
@@ -52,15 +51,6 @@ def build_browser_launch_kwargs(user_data_dir: str | Path, *, headless: bool = F
     if chrome_path:
         kwargs["executable_path"] = chrome_path
     return kwargs
-
-
-def backup_profile(source_dir: Path = PROFILE_DIR, backup_dir: Path = PROFILE_BACKUP_DIR) -> bool:
-    if not source_dir.exists():
-        return False
-    if backup_dir.exists():
-        shutil.rmtree(backup_dir, ignore_errors=True)
-    shutil.copytree(source_dir, backup_dir)
-    return True
 
 
 def whatnot_cookie_count() -> int:

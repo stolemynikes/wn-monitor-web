@@ -38,7 +38,6 @@ CONFIG_PATH = PROJECT_DIR / "config.json"
 CONFIG_EXAMPLE_PATH = PROJECT_DIR / "config.example.json"
 STATE_PATH = PROJECT_DIR / "state.json"
 PROFILE_DIR = PROJECT_DIR / "whatnot-profile"
-PROFILE_BACKUP_DIR = PROJECT_DIR / "whatnot-profile-backup"
 DISCOVERY_QUERY_PATH = PROJECT_DIR / "discovery_getfeed.graphql"
 SEND_LOG_PATH = PROJECT_DIR / "notifications.log"
 
@@ -159,26 +158,6 @@ def _set_window_state(cdp, window_id, state: str, timeout: float = 4.0) -> bool:
         if time.monotonic() >= deadline:
             return False
         time.sleep(0.25)
-
-
-def backup_profile(source_dir: Path = PROFILE_DIR, backup_dir: Path = PROFILE_BACKUP_DIR) -> bool:
-    """Copy the current profile to a last-known-good backup."""
-    if not source_dir.exists():
-        return False
-    if backup_dir.exists():
-        shutil.rmtree(backup_dir, ignore_errors=True)
-    shutil.copytree(source_dir, backup_dir)
-    return True
-
-
-def restore_profile(source_dir: Path = PROFILE_DIR, backup_dir: Path = PROFILE_BACKUP_DIR) -> bool:
-    """Restore the last-known-good profile after a Cloudflare challenge."""
-    if not backup_dir.exists():
-        return False
-    if source_dir.exists():
-        shutil.rmtree(source_dir, ignore_errors=True)
-    shutil.copytree(backup_dir, source_dir)
-    return True
 
 
 def audit_send(backend: str, priority: str, title: str, outcome: str) -> None:
@@ -773,8 +752,6 @@ def cmd_test(config: dict) -> None:
 def cmd_login(config: dict) -> None:
     from playwright.sync_api import sync_playwright
 
-    if PROFILE_DIR.exists():
-        backup_profile()
     with sync_playwright() as p:
         ctx = p.chromium.launch_persistent_context(
             **build_browser_launch_kwargs(PROFILE_DIR, headless=False)
@@ -783,7 +760,6 @@ def cmd_login(config: dict) -> None:
         page.goto("https://www.whatnot.com/login")
         print("A browser window is open. Log in to Whatnot there.")
         input("When you're logged in, press Enter here to save the session and close... ")
-        backup_profile()
         try:
             ctx.close()
         except Exception:
@@ -1025,8 +1001,6 @@ def cmd_run(config: dict) -> None:
            f" +{pinned_extra_tabs}/live pinned seller"
            if watch_giveaways else "; giveaway watching OFF"))
     with sync_playwright() as p:
-        if PROFILE_DIR.exists():
-            backup_profile()
         ctx = p.chromium.launch_persistent_context(
             **build_browser_launch_kwargs(
                 PROFILE_DIR,
@@ -1072,17 +1046,20 @@ def cmd_run(config: dict) -> None:
 
         def announce_challenge(where: str) -> None:
             """Log, notify and restore, wherever the challenge turned up."""
-            log(f"Cloudflare challenge detected on {where} — restoring the "
-                "last known-good profile and stopping.")
-            restore_profile()
-            print(f"Cloudflare challenge detected on {where}. The last "
-                  "known-good profile was restored. Run `python monitor.py "
-                  "login` again before restarting.", flush=True)
+            log(f"Cloudflare challenge detected on {where} — stopping. "
+                "Leave it off for a few hours; these fade on their own. "
+                "If it comes back straight away, use Fresh profile in the "
+                "panel and log in again.")
+            print(f"Cloudflare challenge detected on {where}. Stopped.\n"
+                  "  Wait a few hours before starting again — retrying while "
+                  "blocked makes it last longer.\n"
+                  "  If it recurs immediately, reset the profile and log in "
+                  "again.", flush=True)
             try:
                 notifier.send(
                     "⚠️ Radar stopped: Cloudflare challenge ⚠️",
-                    f"Challenge on {where}. Stopped. Log in again before "
-                    "restarting, and leave it off for a few hours.",
+                    f"Challenge on {where}. Stopped. Leave it off for a few "
+                    "hours — retrying while blocked makes it last longer.",
                     BASE_URL, priority="high",
                 )
             except Exception:
