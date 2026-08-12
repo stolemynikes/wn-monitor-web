@@ -124,7 +124,14 @@ A browser window sits open on your computer while it runs. That's the tool
 doing its job — **don't close it**, that stops the radar.
 
 If it's in your way, tick **keep the browser window minimised** under
-*intensity*. It then lives in the Dock/taskbar instead of on your desktop.
+*intensity*. It then lives in the Dock instead of on your desktop.
+
+**Not available on Windows.** Windows minimises a window by moving it to an
+off-screen coordinate, and web pages can read that position — it looks like a
+bot, and in testing it drew "checking your browser" pages that didn't appear
+otherwise. Put the window on a second virtual desktop instead (`Win+Ctrl+D`,
+then `Win+Tab` and drag it across), or just leave it behind your other windows.
+Neither of those moves it, so neither has the problem.
 
 It checks itself rather than trusting that this is safe. On start it minimises,
 watches for a few seconds to confirm Whatnot still sees the page as visible and

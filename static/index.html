@@ -318,12 +318,8 @@
         <input type="checkbox" id="minBrowser"
                style="min-height:auto; width:16px; height:16px; margin-top:2px">
         <span>keep the browser window minimised
-          <span class="hint" style="display:block; margin:2px 0 0">Tucks it into
-          the Dock/taskbar instead of sitting on your desktop. On start it
-          minimises, checks for a few seconds that Whatnot still sees the page
-          as visible and unthrottled, and puts the window back if not — so it
-          can never quietly cost you giveaway entries. The log says which
-          happened.</span></span>
+          <span class="hint" style="display:block; margin:2px 0 0"
+                id="minBrowserHint"></span></span>
       </label>
       <div class="row" style="margin-top:12px"><button class="sm" onclick="saveTuning()">save</button></div>
     </section>
@@ -416,6 +412,19 @@ async function refresh(){
   $('#btnStart').title=rd.ready?'':'still to do: '+rd.missing.join(', ');
   $('#btnStop').disabled=!run;
   renderSetup(rd);
+  // Windows minimises by parking the window off-screen where page scripts can
+  // see it, so the radar refuses to do it there. Say so instead of offering a
+  // switch that does nothing.
+  $('#minBrowser').disabled=!!s.is_windows;
+  $('#minBrowserHint').textContent=s.is_windows
+    ?'Not available on Windows: minimising there moves the window to an '
+     +'off-screen position that web pages can read, which looks like a bot. '
+     +'Put it on another virtual desktop instead (Win+Ctrl+D), or just leave '
+     +'it behind your other windows.'
+    :'Tucks it into the Dock instead of sitting on your desktop. On start it '
+     +'minimises, checks for a few seconds that Whatnot still sees the page as '
+     +'visible, unthrottled and in the same position, and puts the window back '
+     +'if not. The log says which happened.';
   $('#uptime').textContent=s.control.uptime_seconds?'up '+Math.floor(s.control.uptime_seconds/60)+'m':'';
 
   const sess=s.session; setCard('#cardLogin','#loginBadge',sess.logged_in);

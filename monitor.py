@@ -211,6 +211,15 @@ def minimize_window(ctx, verify_seconds: float = 4.0):
     minimise, watch for a few seconds, and put the window back if anything
     observable changed. Returns (minimised, reason).
     """
+    # Not on Windows, ever. Minimising there is implemented by moving the
+    # window to -32000,-32000, which page scripts read straight off
+    # screenX/screenY. Stream tabs loaded in that state were served Cloudflare
+    # challenges; loaded with the window on screen, they were not. The geometry
+    # check below would catch it and undo it, but there is no reason to make
+    # the attempt at all.
+    if sys.platform == "win32":
+        return False, ("not attempted on Windows — minimising there parks the "
+                       "window at an off-screen coordinate that pages can read")
     page = ctx.pages[0] if ctx.pages else None
     if page is None:
         return False, "no page to attach to"

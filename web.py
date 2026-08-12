@@ -188,6 +188,9 @@ def api_status():
         "login_in_progress": login_running(),
         "login_result": result.read_text(encoding="utf-8") if result.exists() else "",
         "readiness": readiness(),
+        # The minimise option is refused on Windows, so the UI must not present
+        # it as a working switch there.
+        "is_windows": platform.system() == "Windows",
     }
 
 
