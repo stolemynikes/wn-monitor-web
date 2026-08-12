@@ -345,6 +345,40 @@ class AuditLog(TempProject):
         monitor.audit_send("bark", "max", "title", "OK")   # must not raise
 
 
+class TabSpacing(unittest.TestCase):
+    """Tabs opened back to back — 3 page loads in 3 seconds at startup, 2 in 4
+    at each rotation. A run on 2026-08-12 was challenged on the second tab of
+    such a pair."""
+
+    def test_blocks_a_second_open_immediately_after_the_first(self):
+        sp = monitor.Spacer(15)
+        self.assertTrue(sp.ready(), "the first tab should not wait")
+        sp.mark()
+        self.assertFalse(sp.ready(), "a burst is the thing being prevented")
+
+    def test_allows_it_once_the_gap_has_passed(self):
+        sp = monitor.Spacer(15)
+        sp.mark()
+        self.assertTrue(sp.ready(sp.last + 30))
+
+    def test_the_gap_is_jittered_not_a_metronome(self):
+        gaps = {monitor.Spacer(15)._next_gap for _ in range(200)}
+        self.assertGreater(len(gaps), 100, "a fixed interval is its own tell")
+        self.assertTrue(all(12 <= g <= 18 for g in gaps))
+
+    def test_both_fill_loops_respect_it(self):
+        import ast
+        src = pathlib.Path(__file__).with_name("monitor.py").read_text(
+            encoding="utf-8")
+        fn = next(n for n in ast.walk(ast.parse(src))
+                  if isinstance(n, ast.FunctionDef) and n.name == "manage_watchers")
+        gates = sum(1 for n in ast.walk(fn) if isinstance(n, ast.Call)
+                    and getattr(n.func, "id", "") == "tab_open_allowed")
+        self.assertEqual(gates, 2,
+                         "both the configured-seller and discovery fill loops "
+                         "must be spaced, not just one")
+
+
 class StopPathsActuallyStop(unittest.TestCase):
     """A challenge must end the run, not just the helper that spotted it.
 

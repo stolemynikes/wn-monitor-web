@@ -357,6 +357,29 @@ def jitter(seconds: float) -> float:
     return seconds * random.uniform(0.8, 1.2)
 
 
+class Spacer:
+    """Allow an action at most once per interval, with the interval jittered.
+
+    Stream tabs used to open back to back — three page loads in three seconds
+    at startup, two in four at every rotation. Nobody opens six livestreams in
+    ten seconds. The jitter matters as much as the gap: a page load exactly
+    every 15.000s is its own signature.
+    """
+
+    def __init__(self, seconds: float):
+        self.seconds = seconds
+        self.last = -1e9
+        self._next_gap = jitter(seconds)
+
+    def ready(self, now: float | None = None) -> bool:
+        now = time.monotonic() if now is None else now
+        return now - self.last >= self._next_gap
+
+    def mark(self, now: float | None = None) -> None:
+        self.last = time.monotonic() if now is None else now
+        self._next_gap = jitter(self.seconds)
+
+
 def log(msg: str) -> None:
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
 
@@ -1176,7 +1199,18 @@ def cmd_run(config: dict) -> None:
                 return True
             return False
 
+        # Stream tabs used to open back to back: three page loads in three
+        # seconds at startup, and two in four at each rotation. The run on
+        # 2026-08-12 was challenged on the second tab of such a pair. A person
+        # does not open six streams in ten seconds, so space them out —
+        # jittered, because a metronome is its own signature.
+        tab_spacer = Spacer(15)
+
+        def tab_open_allowed() -> bool:
+            return tab_spacer.ready()
+
         def open_watcher(sid, seller, url, source):
+            tab_spacer.mark()
             log(f"{seller}: opening watch tab ({source})")
             try:
                 watchers[sid] = StreamWatcher(
@@ -1240,6 +1274,8 @@ def cmd_run(config: dict) -> None:
             for sid, (seller, url, title) in seller_live.items():
                 if sid in watchers or blocked(sid):
                     continue
+                if not tab_open_allowed():
+                    break          # next tick; one page load at a time
                 if len(watchers) >= cap:
                     disc_ws = [w for w in watchers.values()
                                if w.source == "discovery"
@@ -1307,6 +1343,8 @@ def cmd_run(config: dict) -> None:
                     break
                 if sid in watchers:
                     continue
+                if not tab_open_allowed():
+                    break          # the rest fill in on later ticks
                 seller, url, title = discovered[sid]
                 open_watcher(sid, seller, url, "discovery")
 
