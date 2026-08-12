@@ -67,7 +67,15 @@
   /* Grid and flex children default to min-width:auto, so a nowrap element
      (the long ssh commands) forces the whole page wider than the viewport and
      the page scrolls sideways. Let them shrink so inner overflow-x works. */
-  main > *, .grid > *, .cmd > *{min-width:0}
+  main > *, .grid > *, .cmd > *, .alert > *{min-width:0}
+  /* Long commands live inside .alert > div > ol > li > .cmd. Every one of
+     those is a block that happily grows to its widest nowrap child, so a
+     180-character PowerShell line pushed the card 279px past the window and
+     took all the copy buttons off-screen with it. Let them wrap here: these
+     are commands to copy, not text to read across. */
+  .alert code, li .cmd code{white-space:pre-wrap; overflow-wrap:anywhere}
+  .alert ol{margin:8px 0 0; padding-left:20px}
+  .alert li{max-width:100%}
 
   /* ---------- glass cards ---------- */
   .card{position:relative; border-radius:var(--r); padding:16px;
@@ -708,9 +716,16 @@ function renderSsh(){
 
 function setSshMode(mode){ sshMode=mode; renderSsh(); }
 
+let sshSeen='';
 async function loadSsh(){
   try{
-    sshInfo=await(await fetch('/api/ssh-info')).json();
+    const fresh=await(await fetch('/api/ssh-info')).json();
+    // Only redraw when something actually changed. This card is polled so it
+    // notices sshd starting, but re-rendering it on a timer would wipe the
+    // text selection that IS the copy mechanism on a phone.
+    const sig=JSON.stringify(fresh);
+    if(sig===sshSeen) return;
+    sshSeen=sig; sshInfo=fresh;
     $('#sshHint').innerHTML=esc(sshInfo.remote_login_hint)+'. These use <b>'
       +esc(sshInfo.host)+'</b> ('+esc(sshInfo.via)+')'
       +(sshInfo.via==='tailscale'?', which works from anywhere.'
@@ -776,6 +791,9 @@ $('#notifier').onchange=loadConfig;
 $('#btnStart').onclick=()=>post('/api/start');
 $('#btnStop').onclick=()=>post('/api/stop');
 refresh(); loadConfig(); loadSsh(); loadPhone(); setInterval(refresh,2500);
+// Slower than the main poll: it probes port 22, and it only has to notice
+// sshd being installed, not react instantly.
+setInterval(loadSsh,15000);
 </script>
 </body>
 </html>
