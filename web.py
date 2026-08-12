@@ -48,6 +48,19 @@ CONFIG_PATH = PROJECT_DIR / "config.json"
 EXAMPLE_PATH = PROJECT_DIR / "config.example.json"
 STATIC = PROJECT_DIR / "static"
 
+LOGIN_RESULT = PROJECT_DIR / ".login_result"
+
+
+def forget_login_result() -> None:
+    """Drop the record of the last login's outcome.
+
+    It is a file, so it outlives the thing it describes. After a reset the
+    panel was still reporting "Session saved — 47 whatnot cookies" directly
+    under "profile exists but holds no cookies" — the stale half being the
+    more reassuring one, which is the wrong way round.
+    """
+    LOGIN_RESULT.unlink(missing_ok=True)
+
 # Only these may be written from the UI, so a stray field can't inject config.
 SERVE_HOST = "127.0.0.1"   # set from --host at startup
 
@@ -193,14 +206,14 @@ def login_running() -> bool:
 @app.get("/api/status")
 def api_status():
     st = control.status(log_lines=1)
-    result = PROJECT_DIR / ".login_result"
     return {
         "control": st,
         "config_exists": CONFIG_PATH.exists(),
         "session": profile_tools.session_state(),
         "profile": profile_tools.sizes(),
         "login_in_progress": login_running(),
-        "login_result": result.read_text(encoding="utf-8") if result.exists() else "",
+        "login_result": (LOGIN_RESULT.read_text(encoding="utf-8")
+                         if LOGIN_RESULT.exists() else ""),
         "readiness": readiness(),
     }
 
@@ -558,7 +571,7 @@ def api_login_start():
     require_stopped()
     marker = PROJECT_DIR / ".login_running"
     (PROJECT_DIR / ".login_done").unlink(missing_ok=True)
-    (PROJECT_DIR / ".login_result").unlink(missing_ok=True)
+    forget_login_result()
     proc = subprocess.Popen([sys.executable, str(PROJECT_DIR / "browser_task.py"),
                              "login"], cwd=str(PROJECT_DIR),
                             stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
@@ -609,6 +622,7 @@ def api_clear_site_data():
     require_stopped()
     require_profile_free()
     freed, stuck = profile_tools.clear_site_data()
+    forget_login_result()      # that session is gone; so is its receipt
     return _cleared(freed, stuck, " of site data — you are now logged out, "
                                   "run Login again")
 
@@ -761,6 +775,7 @@ def api_reset_profile():
     require_stopped()
     require_profile_free()
     freed, left = profile_tools.reset_profile()
+    forget_login_result()
     if left:
         return {"message": f"removed {freed / 1e6:.0f} MB but {left} file(s) "
                            "survived — a program still has them open, so you "

@@ -216,6 +216,37 @@ class Deletion(TempProject):
             pathlib.Path.stat = real
 
 
+class StaleLoginReceipt(TempProject):
+    """.login_result is a file, so it outlived the session it described. After
+    a reset the panel showed "Session saved — 47 whatnot cookies" directly
+    under "profile exists but holds no cookies"."""
+
+    def setUp(self):
+        super().setUp()
+        self._real = web.LOGIN_RESULT
+        web.LOGIN_RESULT = self.dir / ".login_result"
+        self.addCleanup(setattr, web, "LOGIN_RESULT", self._real)
+        web.LOGIN_RESULT.write_text("Session saved — 47 whatnot cookies",
+                                    encoding="utf-8")
+        import browser_task
+        browser_task.chrome_owns_profile = lambda: False
+        self.write_config()
+
+    def test_reset_profile_clears_it(self):
+        web.api_reset_profile()
+        self.assertFalse(web.LOGIN_RESULT.exists())
+
+    def test_logging_out_clears_it(self):
+        web.api_clear_site_data()
+        self.assertFalse(web.LOGIN_RESULT.exists())
+
+    def test_clearing_cache_keeps_it(self):
+        # Cache is disposable and does not touch the session, so the receipt
+        # is still true.
+        web.api_clear_cache()
+        self.assertTrue(web.LOGIN_RESULT.exists())
+
+
 class ConfigLocking(TempProject):
     """The panel and the monitor both rewrite config.json; without the lock
     one update is silently lost."""
